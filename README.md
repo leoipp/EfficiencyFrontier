@@ -1,4 +1,4 @@
-# 🌧️🌲 Efficiency Frontier
+# 🌧️☀️🌲 Efficiency Frontier
 
 Efficiency Frontier for Environmental Modeling is a Python-based tool that adapts Modern Portfolio Theory (Markowitz) to environmental and climatic datasets. It models spatial and temporal variability by treating environmental pixels (e.g., precipitation from raster time series) as "climate assets", simulating portfolios to construct a climatic efficiency frontier.
 
