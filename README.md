@@ -24,3 +24,33 @@ Agora com suporte para **variáveis de retorno real**, permitindo análises aind
 
 ```bash
 pip install numpy rasterio matplotlib
+
+### 2. Estrutura esperada
+```bash
+📂 data/
+├── clim_var_2019-09-01.tif
+├── clim_var_2019-09-02.tif
+├── ...
+├── target_var.tif  # (opcional)
+
+### 3. Código de exemplo
+
+```bash
+from markowitz import Markowitz
+
+mk = Markowitz(
+    raster_path_pattern='data/precip_2019-09-*.tif',
+    num_pixels=500,
+    target_raster='data/producao.tif'  # Opcional
+)
+
+mk.load_stack()
+mk.sample_pixels()
+mk.calculate_statistics()
+mk.simulate_portfolios()
+mk.plot_frontier()           # Risco x Retorno (precipitação)
+mk.plot_real_frontier()      # Risco x Retorno real (produção)
+
+---
+
+## 🧠 Explicação
