@@ -11,14 +11,14 @@ class Markowitz:
     dados climáticos como se fossem ativos financeiros.
     """
     __version__ = "0.1b"
-
+    __author__ = "<Leonardo Ippolito Rodrigues>"
     def __init__(self, raster_path_pattern, target_raster=None, num_pixels=None, seed=42):
         """
         Inicializa a análise de Markowitz sobre rasters.
-        :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
-        :param target_raster: Raster de retorno (produção) como argumento opcional
-        :param num_pixels: Número de pixels a amostrar
-        :param seed: Semente para replicabilidade
+            :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
+            :param target_raster: Raster de retorno (produção) como argumento opcional
+            :param num_pixels: Número de pixels a amostrar
+            :param seed: Semente para replicabilidade
         """
         self.raster_path_pattern = raster_path_pattern
         self.target_raster_path = target_raster
