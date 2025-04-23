@@ -47,8 +47,8 @@ class Markowitz:
         files = sorted(glob.glob(self.raster_path_pattern))
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
-        print(f"Stack carregada: {self.stack.shape}")
-        print("Total de NaNs no stack:", np.isnan(self.stack).sum())
+        print(f"\033[92mStack carregada: {self.stack.shape}\033[0m")
+        print(f"\033[94mTotal de NaNs no stack:{np.isnan(self.stack).sum()}\033[0m")
 
     def sample_pixels(self, threshold: float=0.0, data_percent_tolerance: float=0.7):
         """
@@ -72,13 +72,13 @@ class Markowitz:
         valid_ratio = np.mean(self.stack > 0, axis=0)  # (98, 126)
         valid_mask = valid_ratio >= data_percent_tolerance
 
-        print("Pixels válidos após nova máscara:", np.sum(valid_mask))
+        print(f"\033[94mPixels válidos após nova máscara:{np.sum(valid_mask)}\033[0m")
         ys, xs = np.where(valid_mask)
         coords = list(zip(ys, xs))
 
         if self.num_pixels is None:
             self.coords = coords
-            print(f"{len(coords)} pixels amostrados com sucesso.")
+            print(f"\033[92m{len(coords)} pixels amostrados com sucesso.\033[0m")
         else:
             if self.num_pixels > len(coords):
                 raise ValueError(f"Você pediu {self.num_pixels} pixels, mas só existem {len(coords)} válidos.")
@@ -114,7 +114,7 @@ class Markowitz:
         self.mean_precip = self.series.mean(axis=1)
         self.std_precip = self.series.std(axis=1)
         self.cov_matrix = np.cov(self.series)
-        print("Estatísticas climáticas calculadas.")
+        print("\033[92mEstatísticas climáticas calculadas.\033[0m")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
@@ -152,7 +152,7 @@ class Markowitz:
             results[2, i] = sharpe
 
         self.results = results
-        print(f"{num_portfolios} portfolios simulados.")
+        print(f"\033[92m{num_portfolios} portfolios simulados.\033[0m")
 
     def evaluate_against_target(self):
         """
