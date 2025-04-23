@@ -48,8 +48,9 @@ class Markowitz:
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
         print(f"Stack carregada: {self.stack.shape}")
+        print("Total de NaNs no stack:", np.isnan(self.stack).sum())
 
-    def sample_pixels(self):
+    def sample_pixels(self, threshold: float=0.0, data_percent_tolerance: float=0.7):
         """
         O objetivo aqui é selecionar um conjunto de pixels aleatórios a partir do stack de precipitação para análise.
         Aqui, estamos basicamente escolhendo alguns "ativos" (ou pixels de precipitação) para observar como eles
@@ -64,7 +65,14 @@ class Markowitz:
         if self.stack is None:
             raise ValueError("Stack não carregada. Use .load_stack() antes.")
 
-        valid_mask = np.all(self.stack > 0, axis=0)
+        self.stack = np.nan_to_num(self.stack)  # remove NaNs substituindo por 0
+        self.stack[self.stack < threshold] = 0  # aplica threshold
+
+        # Máscara para pixels válidos em pelo menos 70% das datas
+        valid_ratio = np.mean(self.stack > 0, axis=0)  # (98, 126)
+        valid_mask = valid_ratio >= data_percent_tolerance
+
+        print("Pixels válidos após nova máscara:", np.sum(valid_mask))
         ys, xs = np.where(valid_mask)
         coords = list(zip(ys, xs))
 
@@ -108,7 +116,7 @@ class Markowitz:
         self.cov_matrix = np.cov(self.series)
         print("Estatísticas climáticas calculadas.")
 
-    def simulate_portfolios(self, num_portfolios=100000):
+    def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
         Agora, o código vai simular a composição de diversos portfólios climáticos. Cada portfólio será uma
         combinação de pesos diferentes atribuídos a cada pixel (ativo). A partir disso, vamos calcular a média de
@@ -193,7 +201,7 @@ class Markowitz:
         plt.grid(linestyle='--')
         plt.show()
 
-    def get_high_sharpe_precip(self, threshold=1.0):
+    def get_high_sharpe_precip(self, threshold: float=1.0) -> None:
         """
         Retorna a precipitação real ponderada dos portfólios com Sharpe acima do threshold.
         :param threshold: valor mínimo de Sharpe
@@ -220,7 +228,13 @@ class Markowitz:
         return selected_precips
 
 
-mk = Markowitz('G:/PycharmProjects/Fronteira de Eficiencia/Examples/GPM_2019-09-*.tif')
+mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
+
+mk.load_stack()
+mk.sample_pixels()
+mk.calculate_statistics()
+mk.simulate_portfolios()
+mk.plot_frontier()
 
 """
 Variáveis climáticas com avaliação de retorno por pixel dentre as séries temporais:
