@@ -12,17 +12,20 @@ class Markowitz:
     """
     __version__ = "0.1b"
 
-    def __init__(self, raster_path_pattern, num_pixels=None, seed=42):
+    def __init__(self, raster_path_pattern, target_raster=None, num_pixels=None, seed=42):
         """
         Inicializa a análise de Markowitz sobre rasters.
         :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
+        :param target_raster: Raster de retorno (produção) como argumento opcional
         :param num_pixels: Número de pixels a amostrar
         :param seed: Semente para replicabilidade
         """
         self.raster_path_pattern = raster_path_pattern
+        self.target_raster_path = target_raster
         self.num_pixels = num_pixels
         self.seed = seed
-        self.weights_list = []  # Armazenar os pesos
+        self.weights_list = []
+        self.target_values = None
         self.stack = None
         self.series = None
         self.mean_precip = None
@@ -77,6 +80,13 @@ class Markowitz:
             print(f"{self.num_pixels} pixels amostrados com sucesso.")
 
         self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
+
+        # Carregar raster de retorno real (ex: produção)
+        if self.target_raster_path:
+            with rasterio.open(self.target_raster_path) as src:
+                target_data = src.read(1)
+                self.target_values = np.array([target_data[y, x] for y, x in self.coords])
+                print("Valores de retorno (produção) extraídos com sucesso.")
 
     def calculate_statistics(self):
         """
@@ -136,6 +146,20 @@ class Markowitz:
         self.results = results
         print(f"{num_portfolios} portfolios simulados.")
 
+    def evaluate_against_target(self):
+        """
+        Calcula o retorno real dos portfólios usando o raster de retorno
+        """
+        if self.target_values is None or self.weights_list is None:
+            raise ValueError("Valores de retorno reais ou pesos não estão disponíveis.")
+
+        real_returns = []
+        for weights in self.weights_list:
+            retorno_real = np.dot(weights, self.target_values)
+            real_returns.append(retorno_real)
+
+        return np.array(real_returns)
+
     def plot_frontier(self):
         """Plota a Fronteira de Eficiência"""
         if self.results is None:
@@ -148,6 +172,24 @@ class Markowitz:
         plt.ylabel('Retorno (Precipitação média)')
         plt.title('Fronteira de Eficiência Climática')
         plt.colorbar(label='Índice Sharpe Climático')
+        plt.grid(linestyle='--')
+        plt.show()
+
+    def plot_real_frontier(self):
+        """
+        Plota Risco x Retorno real baseado no raster de produção
+        """
+        if self.results is None:
+            raise ValueError("Resultados não simulados.")
+        real_returns = self.evaluate_against_target()
+        riscos = self.results[0]
+
+        plt.figure(figsize=(10, 6))
+        plt.scatter(riscos, real_returns, c=real_returns, cmap='viridis', s=10)
+        plt.xlabel('Risco (Desvio padrão)')
+        plt.ylabel('Retorno real (Produção)')
+        plt.title('Fronteira baseada em Produção')
+        plt.colorbar(label='Produção estimada')
         plt.grid(linestyle='--')
         plt.show()
 
@@ -179,9 +221,21 @@ class Markowitz:
 
 
 mk = Markowitz('G:/PycharmProjects/Fronteira de Eficiencia/Examples/GPM_2019-09-*.tif')
-mk.load_stack()
-mk.sample_pixels()
-mk.calculate_statistics()
-mk.simulate_portfolios()
-mk.plot_frontier()
-mk.get_high_sharpe_precip(1.5)
+
+"""
+Variáveis climáticas com avaliação de retorno por pixel dentre as séries temporais:
+    mk.load_stack()
+    mk.sample_pixels()
+    mk.calculate_statistics()
+    mk.simulate_portfolios()
+    mk.plot_frontier()
+    mk.get_high_sharpe_precip(1.5)
+"""
+"""
+Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produção volumétrica:
+    mk.load_stack()
+    mk.sample_pixels()
+    mk.calculate_statistics()
+    mk.simulate_portfolios()
+    mk.plot_real_frontier()
+"""
