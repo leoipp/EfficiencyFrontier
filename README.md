@@ -73,4 +73,4 @@ mk.get_high_sharpe_precip(threshold=1.0)      # Retrieve raster data for modelli
 ## 📚 Theoretical Foundation
 
 Inspired by the classic model of Harry Markowitz
-- Markowitz, H. (1952). Portfolio Selection. Journal of Finance.
+- [Markowitz, H. (1952). Portfolio Selection. Journal of Finance.](https://www.researchgate.net/publication/228051028_Portfolio_Selection)
