@@ -34,7 +34,7 @@ pip install numpy rasterio matplotlib
 ├── clim_var_2019-09-01.tif
 ├── clim_var_2019-09-02.tif
 ├── ...
-├── target_var.tif  # (opcional)
+├── target_var.tif  # Optional
 ```
 
 ### 3. Code example
