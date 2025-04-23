@@ -1,4 +1,4 @@
-# 🌧️🌲 Markowitz Climático — Fronteira de Eficiência com Rasters
+# 🌧️🌲 Fronteira de Eficiência
 
 Este projeto adapta os princípios do modelo de portfólios de Markowitz para análise climática e ambiental baseada em dados raster (i.e. precipitação, temperatura, umidade e outros). A ideia é tratar pixels como "ativos" e analisar seu comportamento ao longo do tempo — simulando portfólios e encontrando composições com melhor relação retorno/risco.
 
@@ -57,5 +57,16 @@ mk.plot_real_frontier()      # Risco x Retorno real (produção)
 ---
 
 ## 🧠 Explicação
-* Rasters climáticos *
 
+* **Rasters climáticos** = ativos financeiros
+* **Pixels** = cada ativo individual
+* **Série temporal de pixels** = retornos históricos
+* **Índice de Sharpe** = eficiência climática
+* **Raster target** = retorno observado do "mundo real"
+
+--
+
+## 📚 Base Teórica
+
+Inspirado no modelo clássico de Harry Markowitz
+- Markowitz, H. (1952). Portfolio Selection. Journal of Finance.
