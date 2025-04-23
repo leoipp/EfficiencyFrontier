@@ -1,4 +1,4 @@
-# 🌧️🌲 Efficiency Frontier
+# 🌧️☀️🌲 Efficiency Frontier
 
 Efficiency Frontier for Environmental Modeling is a Python-based tool that adapts Modern Portfolio Theory (Markowitz) to environmental and climatic datasets. It models spatial and temporal variability by treating environmental pixels (e.g., precipitation from raster time series) as "climate assets", simulating portfolios to construct a climatic efficiency frontier.
 
@@ -34,7 +34,7 @@ pip install numpy rasterio matplotlib
 ├── clim_var_2019-09-01.tif
 ├── clim_var_2019-09-02.tif
 ├── ...
-├── target_var.tif  # (opcional)
+├── target_var.tif  # Optional
 ```
 
 ### 3. Code example
@@ -50,10 +50,12 @@ mk = Markowitz(
 
 mk.load_stack()
 mk.sample_pixels()
-mk.calculate_statistics()
-mk.simulate_portfolios()
+mk.calculate_statistics(threshold=0, data_percent_tolerance=0.7)
+mk.simulate_portfolios(num_portfolios=1000)
 mk.plot_frontier()           # Risk x Return (clim_var)
 mk.plot_real_frontier()      # Risk x Real Return (target_var)
+
+mk.get_high_sharpe_precip(threshold=1.0)      # Retrieve raster data for modelling
 ```
 
 ---
@@ -71,4 +73,4 @@ mk.plot_real_frontier()      # Risk x Real Return (target_var)
 ## 📚 Theoretical Foundation
 
 Inspired by the classic model of Harry Markowitz
-- Markowitz, H. (1952). Portfolio Selection. Journal of Finance.
+- [Markowitz, H. (1952). Portfolio Selection. Journal of Finance.](https://www.researchgate.net/publication/228051028_Portfolio_Selection)
