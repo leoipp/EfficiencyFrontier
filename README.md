@@ -50,12 +50,12 @@ mk = Markowitz(
 
 mk.load_stack()
 mk.sample_pixels()
-mk.calculate_statistics(threshold=0, data_percent_tolerance=0.7 # Both optional arguments)
-mk.simulate_portfolios(num_portfolios=1000 # Optional)
+mk.calculate_statistics(threshold=0, data_percent_tolerance=0.7)
+mk.simulate_portfolios(num_portfolios=1000)
 mk.plot_frontier()           # Risk x Return (clim_var)
 mk.plot_real_frontier()      # Risk x Real Return (target_var)
 
-mk.get_high_sharpe_precip(threshold=1.0 # Optional)      # Retrieve raster data for modelling
+mk.get_high_sharpe_precip(threshold=1.0)      # Retrieve raster data for modelling
 ```
 
 ---
