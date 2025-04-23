@@ -6,13 +6,18 @@ import matplotlib.pyplot as plt
 
 class Markowitz:
     """
-    A classe Markowitz é o coração do código. Ela tem como objetivo simular a fronteira de eficiência climática com
-    base em rasters de precipitação. A analogia seria algo como um analista de investimentos que deseja analisar os
-    dados climáticos como se fossem ativos financeiros.
+
     """
     __version__ = "0.1b"
     __author__ = "<Leonardo Ippolito Rodrigues>"
     __email__ = "<leoippef@gmail.com>"
+    __license__ = "MIT"
+    __status__ = "Development"
+    __date__ = "2025-04-23"
+    __description__ = """A classe Markowitz é o coração do código. Ela tem como objetivo simular a fronteira de eficiência climática com
+    base em rasters de precipitação. A analogia seria algo como um analista de investimentos que deseja analisar os
+    dados climáticos como se fossem ativos financeiros."""
+
     def __init__(self, raster_path_pattern: str, target_raster: str=None, num_pixels: int=None, seed: int=42) -> None:
         """
         Inicializa a análise de Markowitz sobre rasters.
