@@ -64,7 +64,7 @@ mk.plot_real_frontier()      # Risco x Retorno real (produção)
 * **Índice de Sharpe** = eficiência climática
 * **Raster target** = retorno observado do "mundo real"
 
---
+---
 
 ## 📚 Base Teórica
 
