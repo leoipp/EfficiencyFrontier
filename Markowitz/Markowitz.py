@@ -12,7 +12,7 @@ class Markowitz:
     """
     __version__ = "0.1b"
     __author__ = "<Leonardo Ippolito Rodrigues>"
-    def __init__(self, raster_path_pattern, target_raster=None, num_pixels=None, seed=42):
+    def __init__(self, raster_path_pattern: str, target_raster: str=None, num_pixels: int=None, seed: int=42) -> None:
         """
         Inicializa a análise de Markowitz sobre rasters.
             :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
@@ -43,14 +43,19 @@ class Markowitz:
                 * O código lê todos os arquivos TIFF que correspondem ao padrão raster_path_pattern.
                 * Ele os empilha em uma matriz 3D: Cada camada da matriz será um raster para um dia, e as linhas e
                 colunas representam os diferentes pixels (como diferentes ativos financeiros em diferentes datas).
+                * A matriz resultante terá a forma (n_dias, n_linhas, n_colunas), onde n_dias é o número de dias
+                e n_linhas e n_colunas são as dimensões do raster.
+        :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
         print(f"\033[92mStack carregada: {self.stack.shape}\033[0m")
         print(f"\033[94mTotal de NaNs no stack:{np.isnan(self.stack).sum()}\033[0m")
+        if self.stack.shape[0] == 0:
+            raise ValueError("Nenhum arquivo encontrado. Verifique o padrão do caminho do raster.")
 
-    def sample_pixels(self, threshold: float=0.0, data_percent_tolerance: float=0.7):
+    def sample_pixels(self, threshold: float=0.0, data_percent_tolerance: float=0.7) -> None:
         """
         O objetivo aqui é selecionar um conjunto de pixels aleatórios a partir do stack de precipitação para análise.
         Aqui, estamos basicamente escolhendo alguns "ativos" (ou pixels de precipitação) para observar como eles
@@ -61,6 +66,9 @@ class Markowitz:
                  para construir um portfólio.
                  * A série temporal de precipitação desses pixels selecionados será nossa série temporal de retornos (
                  simulando o desempenho dos ativos ao longo do tempo).
+        :param threshold: valor mínimo de precipitação para considerar um pixel válido
+        :param data_percent_tolerance: porcentagem mínima de dados válidos para considerar um pixel válido
+        :return: lista de coordenadas dos pixels amostrados
         """
         if self.stack is None:
             raise ValueError("Stack não carregada. Use .load_stack() antes.")
@@ -107,6 +115,7 @@ class Markowitz:
                 ao seu  comportamento (o risco).
                 * Matriz de Covariância: A covariância entre os diferentes pixels (ou ativos) mostra como eles se
                 comportam em  conjunto ao longo do tempo, ajudando a entender se eles se movem juntos (correlação).
+        :return: None
         """
         if self.series is None:
             raise ValueError("Pixels não amostrados. Use .sample_pixels() antes.")
@@ -130,7 +139,7 @@ class Markowitz:
                     * Índice de Sharpe: Calculado dividindo o retorno pelo risco, ajudando a determinar qual
                     combinação tem o melhor retorno ajustado ao risco.
         :param num_portfolios: Numero de portifolios a serem simulados
-        :return:
+        :return: None
         """
         if self.cov_matrix is None:
             raise ValueError("Estatísticas não calculadas. Use .calculate_statistics() antes.")
@@ -157,6 +166,7 @@ class Markowitz:
     def evaluate_against_target(self):
         """
         Calcula o retorno real dos portfólios usando o raster de retorno
+        :return: array de retornos reais
         """
         if self.target_values is None or self.weights_list is None:
             raise ValueError("Valores de retorno reais ou pesos não estão disponíveis.")
@@ -169,7 +179,9 @@ class Markowitz:
         return np.array(real_returns)
 
     def plot_frontier(self):
-        """Plota a Fronteira de Eficiência"""
+        """
+        Plota a Fronteira de Eficiência
+        """
         if self.results is None:
             raise ValueError("Resultados não simulados. Use .simulate_portfolios() antes.")
 
@@ -228,7 +240,7 @@ class Markowitz:
         return selected_precips
 
 
-mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
+mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
 
 mk.load_stack()
 mk.sample_pixels()
