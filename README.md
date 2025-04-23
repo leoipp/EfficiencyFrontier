@@ -24,6 +24,7 @@ Agora com suporte para **variáveis de retorno real**, permitindo análises aind
 
 ```bash
 pip install numpy rasterio matplotlib
+```
 
 ### 2. Estrutura esperada
 ```bash
@@ -32,6 +33,7 @@ pip install numpy rasterio matplotlib
 ├── clim_var_2019-09-02.tif
 ├── ...
 ├── target_var.tif  # (opcional)
+```
 
 ### 3. Código de exemplo
 
@@ -50,7 +52,10 @@ mk.calculate_statistics()
 mk.simulate_portfolios()
 mk.plot_frontier()           # Risco x Retorno (precipitação)
 mk.plot_real_frontier()      # Risco x Retorno real (produção)
+```
 
 ---
 
 ## 🧠 Explicação
+* Rasters climáticos *
+
