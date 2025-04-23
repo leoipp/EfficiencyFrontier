@@ -12,6 +12,7 @@ class Markowitz:
     """
     __version__ = "0.1b"
     __author__ = "<Leonardo Ippolito Rodrigues>"
+    __email__ = "<leoippef@gmail.com>"
     def __init__(self, raster_path_pattern: str, target_raster: str=None, num_pixels: int=None, seed: int=42) -> None:
         """
         Inicializa a análise de Markowitz sobre rasters.
@@ -33,6 +34,25 @@ class Markowitz:
         self.cov_matrix = None
         self.results = None
         self.coords = None
+
+    def __repr__(self):
+        return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}, "
+                f"target_raster={self.target_raster_path}, num_pixels={self.num_pixels}, seed={self.seed})")
+
+    def __str__(self):
+        return (f"Markowitz Analysis:\n"
+                f" - Raster Path Pattern: {self.raster_path_pattern}\n"
+                f" - Target Raster: {self.target_raster_path}\n"
+                f" - Number of Pixels: {self.num_pixels}\n"
+                f" - Seed: {self.seed}")
+
+    def __len__(self):
+        return len(self.coords) if self.coords else 0
+
+    def __getitem__(self, index):
+        if self.series is None:
+            raise ValueError("Pixels não amostrados. Use .sample_pixels() antes.")
+        return self.series[index]
 
     def load_stack(self):
         """
