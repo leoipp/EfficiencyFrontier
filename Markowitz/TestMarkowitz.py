@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+import rasterio
 
 from Markowitz import Markowitz
 import os
@@ -82,6 +83,37 @@ class TestMarkowitz(unittest.TestCase):
         self.assertIsInstance(binary_raster, np.ndarray)
         self.assertTrue(np.all(np.logical_or(binary_raster == 0, binary_raster == 1)))
         self.assertEqual(binary_raster.shape, self.markowitz.stack[0].shape)
+
+    def test_create_tif_from_array(self):
+        self.markowitz.load_stack()
+        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
+        binary_raster = np.zeros_like(self.markowitz.stack[0], dtype=int)
+        for y, x in self.markowitz.coords:
+            binary_raster[y, x] = 1
+
+        output_path = "test_output.tif"
+        self.markowitz.create_tif_from_array(output_path, binary_raster)
+
+        # Verifica se o arquivo foi criado
+        self.assertTrue(os.path.exists(output_path))
+
+        # Verifica se o conteúdo do arquivo é consistente
+        with rasterio.open(output_path) as src:
+            written_array = src.read(1)
+            self.assertTrue(np.array_equal(written_array, binary_raster))
+
+        # Verifica se o arquivo é um GeoTIFF válido
+        with rasterio.open(output_path) as src:
+            self.assertEqual(src.count, 1)  # Deve ter apenas uma banda
+            self.assertEqual(src.width, binary_raster.shape[1])
+            self.assertEqual(src.height, binary_raster.shape[0])
+            self.assertIsNotNone(src.crs)  # Deve ter um sistema de referência espacial
+            self.assertIsNotNone(src.transform)  # Deve ter uma transformação geoespacial
+            written_array = src.read(1)
+            self.assertTrue(np.array_equal(written_array, binary_raster))
+
+        # Remove o arquivo de teste
+        os.remove(output_path)
 
     def test_dunder_repr(self):
         repr_output = repr(self.markowitz)

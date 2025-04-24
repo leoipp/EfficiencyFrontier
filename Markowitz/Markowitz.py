@@ -262,7 +262,7 @@ class Markowitz:
 
     def get_high_sharpe(self, threshold: float=1.0) -> tuple[list[np.ndarray], np.ndarray]:
         """
-        Retorna a precipitação real ponderada dos portfólios com Sharpe acima do threshold.
+        Retorna a variavel real ponderada dos portfólios com Sharpe acima do threshold.
         :param threshold: valor mínimo de Sharpe
         :return: lista de arrays de acima do threshold ponderados e raster binário(xs,ys)
         """
@@ -291,6 +291,43 @@ class Markowitz:
         self.logger.info(f"{len(selected_precips)} portfólios selecionados com Sharpe >= {threshold}")
         return selected_precips, binary_raster
 
+    def create_tif_from_array(self, output_path: str, array: np.ndarray) -> None:
+        """
+        Cria um arquivo GeoTIFF a partir de um array numpy usando o primeiro raster do padrão como referência.
+
+        :param output_path: Caminho para salvar o arquivo GeoTIFF gerado.
+        :param array: Array numpy representando o raster.
+        """
+        if not isinstance(output_path, str) or not output_path.strip():
+            raise ValueError("O parâmetro 'output_path' deve ser uma string válida.")
+        if not isinstance(array, np.ndarray):
+            raise ValueError("O parâmetro 'array' deve ser um numpy array.")
+
+        # Obtém o primeiro raster do padrão
+        files = sorted(glob.glob(self.raster_path_pattern))
+        if not files:
+            self.logger.error(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
+            raise ValueError(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
+
+        reference_raster = files[0]
+
+        with rasterio.open(reference_raster) as src:
+            meta = src.meta.copy()
+            meta.update({
+                "dtype": array.dtype.name,
+                "height": array.shape[0],
+                "width": array.shape[1],
+                "count": 1,
+                "compress": "lzw"  # Adiciona compressão para otimizar o tamanho do arquivo
+            })
+
+            with rasterio.open(output_path, "w", **meta) as dst:
+                dst.write(array, 1)
+                dst.transform = src.transform  # Copia a transformação geoespacial
+                dst.crs = src.crs  # Copia o sistema de referência espacial
+
+        self.logger.info(f"Arquivo GeoTIFF criado com sucesso em: {output_path}")
+
 
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
 mk.load_stack()
@@ -309,7 +346,7 @@ Variáveis climáticas com avaliação de retorno por pixel dentre as séries te
     mk.calculate_statistics()
     mk.simulate_portfolios()
     mk.plot_frontier()
-    mk.get_high_sharpe(1.5)
+    sel, bin = mk.get_high_sharpe(.7)
 """
 """
 Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produção volumétrica:
