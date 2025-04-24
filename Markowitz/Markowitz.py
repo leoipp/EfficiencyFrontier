@@ -2,9 +2,8 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
-from concurrent.futures import ThreadPoolExecutor
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 
 class Markowitz:
@@ -260,7 +259,7 @@ class Markowitz:
         plt.show()
         self.logger.info("Fronteira baseada em produção plotada.")
 
-    def get_high_sharpe(self, threshold: float=1.0) -> tuple[list[np.ndarray], np.ndarray]:
+    def get_high_sharpe(self, threshold: float=1.0) -> tuple[List[np.ndarray], np.ndarray]:
         """
         Retorna a variavel real ponderada dos portfólios com Sharpe acima do threshold.
         :param threshold: valor mínimo de Sharpe
