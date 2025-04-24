@@ -303,6 +303,11 @@ class Markowitz:
         if not isinstance(array, np.ndarray):
             raise ValueError("O parâmetro 'array' deve ser um numpy array.")
 
+        # Converte o array para um tipo de dado compatível (exemplo: uint8)
+        if array.dtype not in [np.uint8, np.int16, np.float32]:
+            self.logger.warning(f"Convertendo array de dtype {array.dtype} para float32.")
+            array = array.astype(np.float32)
+
         # Obtém o primeiro raster do padrão
         files = sorted(glob.glob(self.raster_path_pattern))
         if not files:
@@ -314,17 +319,17 @@ class Markowitz:
         with rasterio.open(reference_raster) as src:
             meta = src.meta.copy()
             meta.update({
+                "driver": "GTiff",  # Define explicitamente o driver para GeoTIFF
                 "dtype": array.dtype.name,
                 "height": array.shape[0],
                 "width": array.shape[1],
                 "count": 1,
-                "compress": "lzw"  # Adiciona compressão para otimizar o tamanho do arquivo
+                "crs": src.crs,  # Copia o sistema de referência espacial
+                "transform": src.transform  # Copia a transformação geoespacial
             })
 
             with rasterio.open(output_path, "w", **meta) as dst:
                 dst.write(array, 1)
-                dst.transform = src.transform  # Copia a transformação geoespacial
-                dst.crs = src.crs  # Copia o sistema de referência espacial
 
         self.logger.info(f"Arquivo GeoTIFF criado com sucesso em: {output_path}")
 
@@ -336,6 +341,7 @@ mk.calculate_statistics()
 mk.simulate_portfolios()
 mk.plot_frontier()
 sel, bin = mk.get_high_sharpe(.7)
+mk.create_tif_from_array('output_mask.tif', bin)
 
 
 """
@@ -347,6 +353,8 @@ Variáveis climáticas com avaliação de retorno por pixel dentre as séries te
     mk.simulate_portfolios()
     mk.plot_frontier()
     sel, bin = mk.get_high_sharpe(.7)
+    mk.create_tif_from_array('output_mask.tif', bin)
+    
 """
 """
 Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produção volumétrica:
