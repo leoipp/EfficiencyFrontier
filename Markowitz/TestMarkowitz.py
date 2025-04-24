@@ -71,14 +71,17 @@ class TestMarkowitz(unittest.TestCase):
         self.assertIsNotNone(self.markowitz_with_num_pixels.results)
         self.assertEqual(self.markowitz_with_num_pixels.results.shape[1], 50)
 
-    def test_get_high_sharpe_precip(self):
+    def test_get_high_sharpe(self):
         self.markowitz.load_stack()
         self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
         self.markowitz.calculate_statistics()
         self.markowitz.simulate_portfolios(num_portfolios=100)
-        high_sharpe = self.markowitz.get_high_sharpe_precip(threshold=1.0)
-        self.assertIsInstance(high_sharpe, list)
-        self.assertGreaterEqual(len(high_sharpe), 0)
+        high_sharpe_precips, binary_raster = self.markowitz.get_high_sharpe(threshold=1.0)
+        self.assertIsInstance((high_sharpe_precips, binary_raster), tuple)
+        self.assertIsInstance(high_sharpe_precips, list)
+        self.assertIsInstance(binary_raster, np.ndarray)
+        self.assertTrue(np.all(np.logical_or(binary_raster == 0, binary_raster == 1)))
+        self.assertEqual(binary_raster.shape, self.markowitz.stack[0].shape)
 
     def test_dunder_repr(self):
         repr_output = repr(self.markowitz)

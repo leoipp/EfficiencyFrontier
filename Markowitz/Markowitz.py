@@ -260,11 +260,11 @@ class Markowitz:
         plt.show()
         self.logger.info("Fronteira baseada em produção plotada.")
 
-    def get_high_sharpe_precip(self, threshold: float=1.0) -> None:
+    def get_high_sharpe(self, threshold: float=1.0) -> tuple[list[np.ndarray], np.ndarray]:
         """
         Retorna a precipitação real ponderada dos portfólios com Sharpe acima do threshold.
         :param threshold: valor mínimo de Sharpe
-        :return: lista de arrays de precipitação ponderada
+        :return: lista de arrays de acima do threshold ponderados e raster binário(xs,ys)
         """
         if self.results is None or self.weights_list is None:
             raise ValueError("Portfólios não simulados ainda.")
@@ -274,17 +274,22 @@ class Markowitz:
 
         if len(high_sharpe_indices) == 0:
             self.logger.warning("Nenhum portfólio com Sharpe acima do threshold.")
-            return []
+            return [], np.zeros_like(self.stack[0], dtype=int)
 
         selected_precips = []
+        binary_raster = np.zeros_like(self.stack[0], dtype=int)
         for idx in high_sharpe_indices:
             weights = self.weights_list[idx]
             # Combina a série temporal real com os pesos (precipitação ponderada ao longo do tempo)
             combined = np.dot(weights, self.series)
             selected_precips.append(combined)
 
+        # Marca os pixels selecionados no raster binário
+        for y, x in self.coords:
+            binary_raster[y, x] = 1
+
         self.logger.info(f"{len(selected_precips)} portfólios selecionados com Sharpe >= {threshold}")
-        return selected_precips
+        return selected_precips, binary_raster
 
 
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
@@ -293,7 +298,8 @@ mk.sample_pixels()
 mk.calculate_statistics()
 mk.simulate_portfolios()
 mk.plot_frontier()
-mk.get_high_sharpe_precip(.7)
+sel, bin = mk.get_high_sharpe(.7)
+
 
 """
 mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
@@ -303,7 +309,7 @@ Variáveis climáticas com avaliação de retorno por pixel dentre as séries te
     mk.calculate_statistics()
     mk.simulate_portfolios()
     mk.plot_frontier()
-    mk.get_high_sharpe_precip(1.5)
+    mk.get_high_sharpe(1.5)
 """
 """
 Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produção volumétrica:
