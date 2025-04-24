@@ -87,11 +87,20 @@ class Markowitz:
         :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
-        check_consistent_crs(files, self.logger)
-        check_consistent_pixel_size(files, self.logger)
         if not files:
             self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
+
+        # Check CRS consistency
+        if not check_consistent_crs(files, self.logger):
+            self.logger.warning("Inconsistent CRS detected. Aborting stack loading.")
+            return
+
+        # Check pixel size consistency
+        if not check_consistent_pixel_size(files, self.logger):
+            self.logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
+            return
+
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
         self.logger.info(f"Stack loaded: {self.stack.shape}")
@@ -328,7 +337,7 @@ class Markowitz:
 
         self.logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
-mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
+mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif')
 mk.load_stack()
 
 """
