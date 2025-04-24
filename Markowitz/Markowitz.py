@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import logging
 from typing import Optional, List
 
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio
+
 
 class Markowitz:
     __version__ = "0.1b"
@@ -117,7 +119,7 @@ class Markowitz:
         self.stack[self.stack < threshold] = 0  # aplica threshold
 
         # Máscara para pixels válidos em pelo menos 70% das datas
-        valid_ratio = np.mean(self.stack > 0, axis=0)  # (98, 126)
+        valid_ratio = np.mean(self.stack > 0, axis=0)
         valid_mask = valid_ratio >= data_percent_tolerance
 
         self.logger.info(f"Pixels válidos antes da máscara: {np.sum(valid_mask)}")
@@ -190,10 +192,10 @@ class Markowitz:
 
         def simulate_portfolio():
             weights = np.random.random(n)
-            weights /= np.sum(weights)
+            weights = normalize_weights(weights)
             retorno = np.dot(weights, self.mean_)
             risco = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
-            sharpe = retorno / risco
+            sharpe = calculate_sharpe_ratio(retorno, risco)
             return risco, retorno, sharpe, weights
 
         for i in range(num_portfolios):
@@ -302,10 +304,7 @@ class Markowitz:
         if not isinstance(array, np.ndarray):
             raise ValueError("O parâmetro 'array' deve ser um numpy array.")
 
-        # Converte o array para um tipo de dado compatível (exemplo: uint8)
-        if array.dtype not in [np.uint8, np.int16, np.float32]:
-            self.logger.warning(f"Convertendo array de dtype {array.dtype} para float32.")
-            array = array.astype(np.float32)
+        array = validate_array_dtype(array, [np.uint8, np.int16, np.float32])
 
         # Obtém o primeiro raster do padrão
         files = sorted(glob.glob(self.raster_path_pattern))
