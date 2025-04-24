@@ -15,27 +15,26 @@ class Markowitz:
     __license__ = "MIT"
     __status__ = "Development"
     __date__ = "2025-04-23"
-    __description__ = """A classe Markowitz é o coração do código. Ela tem como objetivo simular a fronteira de eficiência climática com
-    base em rasters de precipitação. A analogia seria algo como um analista de investimentos que deseja analisar os
-    dados climáticos como se fossem ativos financeiros."""
+    __description__ = """The Markowitz class is the core of the code. Its purpose is to simulate the climate efficiency frontier based on precipitation rasters. 
+    The analogy would be something like an investment analyst who wants to analyze climate data as if they were financial assets."""
 
     def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
                  num_pixels: Optional[int] = None, seed: int = 42) -> None:
         """
-        Inicializa a análise de Markowitz sobre rasters.
-            :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
-            :param target_raster: Raster de retorno (produção) como argumento opcional
-            :param num_pixels: Número de pixels a amostrar
-            :param seed: Semente para replicabilidade
+        Initializes the Markowitz analysis on rasters.
+            :param raster_path_pattern: Pattern for files, e.g., 'data/precip_2019-09-*.tif'
+            :param target_raster: Return raster (production) as an optional argument
+            :param num_pixels: Number of pixels to sample
+            :param seed: Seed for reproducibility
         """
         if not isinstance(raster_path_pattern, str) or not raster_path_pattern.strip():
-            raise ValueError("O parâmetro 'raster_path_pattern' deve ser uma string válida.")
+            raise ValueError("The 'raster_path_pattern' parameter must be a valid string.")
         if target_raster is not None and not isinstance(target_raster, str):
-            raise ValueError("O parâmetro 'target_raster' deve ser uma string ou None.")
+            raise ValueError("The 'target_raster' parameter must be a string or None.")
         if num_pixels is not None and (not isinstance(num_pixels, int) or num_pixels <= 0):
-            raise ValueError("O parâmetro 'num_pixels' deve ser um inteiro positivo ou None.")
+            raise ValueError("The 'num_pixels' parameter must be a positive integer or None.")
         if not isinstance(seed, int) or seed < 0:
-            raise ValueError("O parâmetro 'seed' deve ser um inteiro não negativo.")
+            raise ValueError("The 'seed' parameter must be a non-negative integer.")
 
         self.raster_path_pattern = raster_path_pattern
         self.target_raster_path = target_raster
@@ -51,10 +50,10 @@ class Markowitz:
         self.results = None
         self.coords = None
 
-        # Configuração básica do logger
+        # Basic logger configuration
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
-        self.logger.info("Classe Markowitz inicializada com sucesso.")
+        self.logger.info("Markowitz class successfully initialized.")
 
     def __repr__(self):
         return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}, "
@@ -72,75 +71,70 @@ class Markowitz:
 
     def __getitem__(self, index):
         if self.series is None:
-            raise ValueError("Pixels não amostrados. Use .sample_pixels() antes.")
+            raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
         return self.series[index]
 
     def load_stack(self):
         """
-        O metodo carrega todos os rasters em um array 3D.Isso pode ser comparado a coletar dados financeiros de
-        diferentes ativos ao longo de vários dias. Aqui, os ativos são os valores de precipitação diários em várias
-        regiões. Basicamente, amostra N pixels válidos e extrai séries temporais.
-            Como funciona:
-                * O código lê todos os arquivos TIFF que correspondem ao padrão raster_path_pattern.
-                * Ele os empilha em uma matriz 3D: Cada camada da matriz será um raster para um dia, e as linhas e
-                colunas representam os diferentes pixels (como diferentes ativos financeiros em diferentes datas).
-                * A matriz resultante terá a forma (n_dias, n_linhas, n_colunas), onde n_dias é o número de dias
-                e n_linhas e n_colunas são as dimensões do raster.
+        This method loads all rasters into a 3D array. This can be compared to collecting financial data from different assets over several days.
+        Here, the assets are the daily precipitation values in various regions. Essentially, it samples N valid pixels and extracts time series.
+            How it works:
+                * The code reads all TIFF files matching the raster_path_pattern.
+                * It stacks them into a 3D array: Each layer of the array will be a raster for a day, and the rows and columns represent the different pixels
+                  (like different financial assets on different dates).
+                * The resulting array will have the shape (n_days, n_rows, n_columns), where n_days is the number of days, and n_rows and n_columns are the raster dimensions.
         :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
         if not files:
-            self.logger.error(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
-            raise ValueError(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
+            self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
+            raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
-        self.logger.info(f"Stack carregada: {self.stack.shape}")
-        self.logger.info(f"Total de NaNs no stack: {np.isnan(self.stack).sum()}")
+        self.logger.info(f"Stack loaded: {self.stack.shape}")
+        self.logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
 
     def sample_pixels(self, threshold: float = 0.0, data_percent_tolerance: float = 0.7) -> None:
         """
-        O objetivo aqui é selecionar um conjunto de pixels aleatórios a partir do stack de precipitação para análise.
-        Aqui, estamos basicamente escolhendo alguns "ativos" (ou pixels de precipitação) para observar como eles
-        variam ao longo do tempo.
-            Como funciona:
-                 * O código verifica quais pixels possuem valores válidos (precipitação maior que 0).
-                 * Em seguida, amostra número de pixels aleatórios, como se estivéssemos escolhendo ativos financeiros
-                 para construir um portfólio.
-                 * A série temporal de precipitação desses pixels selecionados será nossa série temporal de retornos (
-                 simulando o desempenho dos ativos ao longo do tempo).
-        :param threshold: valor mínimo de precipitação para considerar um pixel válido
-        :param data_percent_tolerance: porcentagem mínima de dados válidos para considerar um pixel válido
-        :return: lista de coordenadas dos pixels amostrados
+        The goal here is to select a set of random pixels from the precipitation stack for analysis.
+        Here, we are essentially choosing some "assets" (or precipitation pixels) to observe how they vary over time.
+            How it works:
+                 * The code checks which pixels have valid values (precipitation greater than 0).
+                 * Then, it samples a number of random pixels, as if we were choosing financial assets to build a portfolio.
+                 * The time series of precipitation for these selected pixels will be our time series of returns (simulating the performance of assets over time).
+        :param threshold: Minimum precipitation value to consider a pixel valid
+        :param data_percent_tolerance: Minimum percentage of valid data to consider a pixel valid
+        :return: List of coordinates of sampled pixels
         """
         if self.stack is None:
-            raise ValueError("Stack não carregada. Use .load_stack() antes.")
+            raise ValueError("Stack not loaded. Use .load_stack() first.")
 
-        self.stack = np.nan_to_num(self.stack)  # remove NaNs substituindo por 0
-        self.stack[self.stack < threshold] = 0  # aplica threshold
+        self.stack = np.nan_to_num(self.stack)  # removes NaNs by replacing them with 0
+        self.stack[self.stack < threshold] = 0  # applies threshold
 
-        # Máscara para pixels válidos em pelo menos 70% das datas
+        # Mask for pixels valid in at least 70% of the dates
         valid_ratio = np.mean(self.stack > 0, axis=0)
         valid_mask = valid_ratio >= data_percent_tolerance
 
-        self.logger.info(f"Pixels válidos antes da máscara: {np.sum(valid_mask)}")
+        self.logger.info(f"Valid pixels before masking: {np.sum(valid_mask)}")
         ys, xs = np.where(valid_mask)
         coords = list(zip(ys, xs))
 
         if self.num_pixels is None:
             self.coords = coords
-            self.logger.info(f"Todos os pixels válidos amostrados: {len(coords)}")
+            self.logger.info(f"All valid pixels sampled: {len(coords)}")
         else:
             if self.num_pixels > len(coords):
-                self.logger.error(f"Você pediu {self.num_pixels} pixels, mas só existem {len(coords)} válidos.")
-                raise ValueError(f"Você pediu {self.num_pixels} pixels, mas só existem {len(coords)} válidos.")
+                self.logger.error(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
+                raise ValueError(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
             np.random.seed(self.seed)
             sampled = np.random.choice(len(coords), self.num_pixels, replace=False)
             self.coords = [coords[i] for i in sampled]
-            self.logger.info(f"Amostrados {self.num_pixels} pixels aleatórios.")
+            self.logger.info(f"{self.num_pixels} random pixels sampled.")
 
         self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
 
-        # Carregar raster de retorno real
+        # Load actual return raster
         if self.target_raster_path:
             with rasterio.open(self.target_raster_path) as src:
                 target_data = src.read(1)
@@ -149,43 +143,43 @@ class Markowitz:
 
     def calculate_statistics(self):
         """
-        Agora, vamos calcular médias, desvios padrão e matriz de covariância das séries temporais de precipitação
-        dos pixels amostrados. Essas estatísticas são essenciais para entender a performance histórica e o risco de
-        cada pixel.
-            Como funciona:
-                * Média de Precipitação: É a média de retornos para cada pixel (ativo).
-                * Desvio Padrão: Medimos a volatilidade de cada pixel ao longo do tempo, ou seja, a incerteza associada
-                ao seu  comportamento (o risco).
-                * Matriz de Covariância: A covariância entre os diferentes pixels (ou ativos) mostra como eles se
-                comportam em  conjunto ao longo do tempo, ajudando a entender se eles se movem juntos (correlação).
+        Now, we will calculate means, standard deviations, and the covariance matrix of the precipitation time series
+        from the sampled pixels. These statistics are essential to understand the historical performance and risk of
+        each pixel.
+            How it works:
+                * Precipitation Mean: It is the average return for each pixel (asset).
+                * Standard Deviation: We measure the volatility of each pixel over time, i.e., the uncertainty associated
+                with its behavior (the risk).
+                * Covariance Matrix: The covariance between the different pixels (or assets) shows how they behave
+                together over time, helping to understand if they move together (correlation).
         :return: None
         """
         if self.series is None:
-            raise ValueError("Pixels não amostrados. Use .sample_pixels() antes.")
+            raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
 
         self.mean_ = self.series.mean(axis=1)
         self.std_ = self.series.std(axis=1)
         self.cov_matrix = np.cov(self.series)
-        self.logger.info("Estatísticas calculadas com sucesso: média, desvio padrão e matriz de covariância.")
+        self.logger.info("Statistics successfully calculated: mean, standard deviation, and covariance matrix.")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
-        Agora, o código vai simular a composição de diversos portfólios climáticos. Cada portfólio será uma
-        combinação de pesos diferentes atribuídos a cada pixel (ativo). A partir disso, vamos calcular a média de
-        precipitação (retorno) e o risco (desvio padrão) associado a cada combinação.
-            Como funciona:
-                * Pesos aleatórios são atribuídos a cada pixel.
-                * Para cada combinação de pesos, é calculado o retorno esperado e o risco do portfólio, assim como o
-                Índice de Sharpe.
-                    * Retorno: Média ponderada das precipitações.
-                    * Risco: Desvio padrão ponderado usando a matriz de covariância.
-                    * Índice de Sharpe: Calculado dividindo o retorno pelo risco, ajudando a determinar qual
-                    combinação tem o melhor retorno ajustado ao risco.
-        :param num_portfolios: Numero de portifolios a serem simulados
+        Now, the code will simulate the composition of various climate portfolios. Each portfolio will be a
+        combination of different weights assigned to each pixel (asset). From this, we will calculate the average
+        precipitation (return) and the risk (standard deviation) associated with each combination.
+            How it works:
+                * Random weights are assigned to each pixel.
+                * For each weight combination, the expected return and risk of the portfolio are calculated, as well as the
+                Sharpe Ratio.
+                    * Return: Weighted average of the precipitations.
+                    * Risk: Weighted standard deviation using the covariance matrix.
+                    * Sharpe Ratio: Calculated by dividing the return by the risk, helping to determine which
+                    combination has the best risk-adjusted return.
+        :param num_portfolios: Number of portfolios to be simulated
         :return: None
         """
         if self.cov_matrix is None:
-            raise ValueError("Estatísticas não calculadas. Use .calculate_statistics() antes.")
+            raise ValueError("Statistics not calculated. Use .calculate_statistics() first.")
 
         results = np.zeros((3, num_portfolios))
         n = len(self.mean_)
@@ -206,143 +200,133 @@ class Markowitz:
             self.weights_list.append(weights)
 
         self.results = results
-        self.logger.info(f"{num_portfolios} portfólios simulados com sucesso.")
+        self.logger.info(f"{num_portfolios} portfolios successfully simulated.")
 
     def evaluate_against_target(self):
         """
-        Calcula o retorno real dos portfólios usando o raster de retorno
-        :return: array de retornos reais
+        Calculates the actual return of the portfolios using the return raster
+        :return: array of actual returns
         """
         if self.target_values is None or self.weights_list is None:
-            raise ValueError("Valores de retorno reais ou pesos não estão disponíveis.")
+            raise ValueError("Actual return values or weights are not available.")
 
         real_returns = []
         for weights in self.weights_list:
             retorno_real = np.dot(weights, self.target_values)
             real_returns.append(retorno_real)
 
-        self.logger.info("Avaliação contra o raster de retorno concluída.")
+        self.logger.info("Evaluation against the return raster completed.")
         return np.array(real_returns)
 
     def plot_frontier(self):
         """
-        Plota a Fronteira de Eficiência
+        Plots the Efficiency Frontier
         """
         if self.results is None:
-            raise ValueError("Resultados não simulados. Use .simulate_portfolios() antes.")
+            raise ValueError("Results not simulated. Use .simulate_portfolios() first.")
 
         risco, retorno, sharpe = self.results
         plt.figure(figsize=(10, 6))
         plt.scatter(risco, retorno, c=sharpe, cmap='plasma', s=10)
-        plt.xlabel('Risco (Desvio padrão)')
-        plt.ylabel('Retorno (Precipitação média)')
-        plt.title('Fronteira de Eficiência Climática')
-        plt.colorbar(label='Índice Sharpe Climático')
+        plt.xlabel('Risk (Standard Deviation)')
+        plt.ylabel('Return (Average Precipitation)')
+        plt.title('Climate Efficiency Frontier')
+        plt.colorbar(label='Climate Sharpe Ratio')
         plt.grid(linestyle='--')
         plt.show()
-        self.logger.info("Fronteira de eficiência climática plotada.")
+        self.logger.info("Climate efficiency frontier plotted.")
 
     def plot_real_frontier(self):
         """
-        Plota Risco x Retorno real baseado no raster de produção
+        Plots Risk vs. Actual Return based on the production raster
         """
         if self.results is None:
-            raise ValueError("Resultados não simulados.")
+            raise ValueError("Results not simulated.")
         real_returns = self.evaluate_against_target()
         riscos = self.results[0]
 
         plt.figure(figsize=(10, 6))
         plt.scatter(riscos, real_returns, c=real_returns, cmap='viridis', s=10)
-        plt.xlabel('Risco (Desvio padrão)')
-        plt.ylabel('Retorno real (Produção)')
-        plt.title('Fronteira baseada em Produção')
-        plt.colorbar(label='Produção estimada')
+        plt.xlabel('Risk (Standard Deviation)')
+        plt.ylabel('Actual Return (Production)')
+        plt.title('Frontier Based on Production')
+        plt.colorbar(label='Estimated Production')
         plt.grid(linestyle='--')
         plt.show()
-        self.logger.info("Fronteira baseada em produção plotada.")
+        self.logger.info("Frontier based on production plotted.")
 
     def get_high_sharpe(self, threshold: float=1.0) -> tuple[List[np.ndarray], np.ndarray]:
         """
-        Retorna a variavel real ponderada dos portfólios com Sharpe acima do threshold.
-        :param threshold: valor mínimo de Sharpe
-        :return: lista de arrays de acima do threshold ponderados e raster binário(xs,ys)
+        Returns the actual weighted variable of portfolios with Sharpe above the threshold.
+        :param threshold: minimum Sharpe value
+        :return: list of arrays above the weighted threshold and binary raster (xs, ys)
         """
         if self.results is None or self.weights_list is None:
-            raise ValueError("Portfólios não simulados ainda.")
+            raise ValueError("Portfolios not simulated yet.")
 
         riscos, retornos, sharpes = self.results
         high_sharpe_indices = np.where(sharpes >= threshold)[0]
 
         if len(high_sharpe_indices) == 0:
-            self.logger.warning("Nenhum portfólio com Sharpe acima do threshold.")
+            self.logger.warning("No portfolio with Sharpe above the threshold.")
             return [], np.zeros_like(self.stack[0], dtype=int)
 
         selected_precips = []
         binary_raster = np.zeros_like(self.stack[0], dtype=int)
         for idx in high_sharpe_indices:
             weights = self.weights_list[idx]
-            # Combina a série temporal real com os pesos (precipitação ponderada ao longo do tempo)
+            # Combines the actual time series with the weights (weighted precipitation over time)
             combined = np.dot(weights, self.series)
             selected_precips.append(combined)
 
-        # Marca os pixels selecionados no raster binário
+        # Marks the selected pixels in the binary raster
         for y, x in self.coords:
             binary_raster[y, x] = 1
 
-        self.logger.info(f"{len(selected_precips)} portfólios selecionados com Sharpe >= {threshold}")
+        self.logger.info(f"{len(selected_precips)} portfolios selected with Sharpe >= {threshold}")
         return selected_precips, binary_raster
 
     def create_tif_from_array(self, output_path: str, array: np.ndarray) -> None:
         """
-        Cria um arquivo GeoTIFF a partir de um array numpy usando o primeiro raster do padrão como referência.
+        Creates a GeoTIFF file from a numpy array using the first raster of the pattern as a reference.
 
-        :param output_path: Caminho para salvar o arquivo GeoTIFF gerado.
-        :param array: Array numpy representando o raster.
+        :param output_path: Path to save the generated GeoTIFF file.
+        :param array: Numpy array representing the raster.
         """
         if not isinstance(output_path, str) or not output_path.strip():
-            raise ValueError("O parâmetro 'output_path' deve ser uma string válida.")
+            raise ValueError("The 'output_path' parameter must be a valid string.")
         if not isinstance(array, np.ndarray):
-            raise ValueError("O parâmetro 'array' deve ser um numpy array.")
+            raise ValueError("The 'array' parameter must be a numpy array.")
 
         array = validate_array_dtype(array, [np.uint8, np.int16, np.float32])
 
-        # Obtém o primeiro raster do padrão
+        # Gets the first raster of the pattern
         files = sorted(glob.glob(self.raster_path_pattern))
         if not files:
-            self.logger.error(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
-            raise ValueError(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
+            self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
+            raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
 
         reference_raster = files[0]
 
         with rasterio.open(reference_raster) as src:
             meta = src.meta.copy()
             meta.update({
-                "driver": "GTiff",  # Define explicitamente o driver para GeoTIFF
+                "driver": "GTiff",  # Explicitly defines the driver for GeoTIFF
                 "dtype": array.dtype.name,
                 "height": array.shape[0],
                 "width": array.shape[1],
                 "count": 1,
-                "crs": src.crs,  # Copia o sistema de referência espacial
-                "transform": src.transform  # Copia a transformação geoespacial
+                "crs": src.crs,  # Copies the spatial reference system
+                "transform": src.transform  # Copies the geospatial transformation
             })
 
             with rasterio.open(output_path, "w", **meta) as dst:
                 dst.write(array, 1)
 
-        self.logger.info(f"Arquivo GeoTIFF criado com sucesso em: {output_path}")
-
-
-mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
-mk.load_stack()
-mk.sample_pixels()
-mk.calculate_statistics()
-mk.simulate_portfolios()
-mk.plot_frontier()
-sel, bin = mk.get_high_sharpe(.7)
-mk.create_tif_from_array('output_mask.tif', bin)
-
+        self.logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
 """
+mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
 mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
 Variáveis climáticas com avaliação de retorno por pixel dentre as séries temporais:
     mk.load_stack()
