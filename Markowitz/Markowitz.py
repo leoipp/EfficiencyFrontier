@@ -139,7 +139,7 @@ class Markowitz:
 
         self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
 
-        # Carregar raster de retorno real (ex: produção)
+        # Carregar raster de retorno real
         if self.target_raster_path:
             with rasterio.open(self.target_raster_path) as src:
                 target_data = src.read(1)
@@ -287,7 +287,13 @@ class Markowitz:
         return selected_precips
 
 
-
+mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
+mk.load_stack()
+mk.sample_pixels()
+mk.calculate_statistics()
+mk.simulate_portfolios()
+mk.plot_frontier()
+mk.get_high_sharpe_precip(.7)
 
 """
 mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
