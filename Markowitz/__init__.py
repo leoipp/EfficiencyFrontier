@@ -26,6 +26,7 @@ The analogy would be something like an investment analyst who wants to analyze c
 # Import main components
 from .Markowitz import Markowitz
 from . import utils
+from . import checkpoints
 
 # Define what is exported when using `from Markowitz import *`
-__all__ = ["Markowitz", "utils"]
+__all__ = ["Markowitz", "utils", "checkpoints"]

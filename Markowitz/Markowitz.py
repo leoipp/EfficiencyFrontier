@@ -2,12 +2,13 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
-import logging
+
 from typing import Optional, List
 
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, check_consistent_crs, \
-    check_consistent_pixel_size
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio
+from checkpoints import check_consistent_crs, check_consistent_pixel_size
 
+from .logging_config import logger
 
 class Markowitz:
     def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
@@ -42,10 +43,7 @@ class Markowitz:
         self.results = None
         self.coords = None
 
-        # Basic logger configuration
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("Markowitz class successfully initialized.")
+        logger.info("Markowitz class successfully initialized.")
 
     def __repr__(self):
         return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}, "
