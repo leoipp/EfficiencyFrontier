@@ -1,5 +1,5 @@
 // === PARÂMETROS ===
-var regionFeatureCollection = "Assets"; // Nome do FeatureCollection com a região
+var regionFeatureCollection = "ASSET"; // Nome do FeatureCollection com a região
 var regionFilterField = "FIELD_NAME"; // Nome do campo a ser filtrado
 var regionFilterValue = "VALUE"; // Valor do campo a ser filtrado
 var startDate = "2010-01-01"; // Data de início

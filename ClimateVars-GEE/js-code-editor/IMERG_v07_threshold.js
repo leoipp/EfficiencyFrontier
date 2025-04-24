@@ -1,7 +1,7 @@
 // === PARÂMETROS ===
-var regionFeatureCollection = "projects/ee-leoippef/assets/BR_UF_2021"; // Nome do FeatureCollection com a região
-var regionFilterField = "SIGLA";   // Nome do campo a ser filtrado
-var regionFilterValue = "MG";        // Valor do campo a ser filtrado
+var regionFeatureCollection = "ASSET"; // Nome do FeatureCollection com a região
+var regionFilterField = "FIELD_NAME";   // Nome do campo a ser filtrado
+var regionFilterValue = "VALUE";        // Valor do campo a ser filtrado
 var startDate = "2024-01-01";           // Data de início
 var endDate = "2024-12-31";             // Data de fim
 var mode = "mensal";                    // ou "diario"
