@@ -154,3 +154,48 @@ def check_consistent_pixel_size(files: list, log: Optional[logging.Logger] = Non
         log.info(f"All rasters have a consistent pixel size: {pixel_sizes.pop()}")
     return True
 
+
+def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple, log: Optional[logging.Logger] = None) -> None:
+    """
+    Resamples a raster to a specified pixel size.
+
+    :param input_path: Path to the input raster file.
+    :param output_path: Path to save the resampled raster.
+    :param target_pixel_size: Target pixel size as a tuple (x_res, y_res).
+    :param log: Optional logger to log messages.
+    """
+    try:
+        with rasterio.open(input_path) as src:
+            transform = src.transform
+            new_transform = rasterio.Affine(
+                target_pixel_size[0], transform.b, transform.c,
+                transform.d, -target_pixel_size[1], transform.f
+            )
+            new_width = int((src.bounds.right - src.bounds.left) / target_pixel_size[0])
+            new_height = int((src.bounds.top - src.bounds.bottom) / target_pixel_size[1])
+
+            meta = src.meta.copy()
+            meta.update({
+                "transform": new_transform,
+                "width": new_width,
+                "height": new_height
+            })
+
+            with rasterio.open(output_path, "w", **meta) as dst:
+                rasterio.warp.reproject(
+                    source=rasterio.band(src, 1),
+                    destination=rasterio.band(dst, 1),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=new_transform,
+                    dst_crs=src.crs,
+                    resampling=rasterio.warp.Resampling.bilinear
+                )
+
+        if log:
+            log.info(f"Raster resampled and saved to {output_path} with pixel size {target_pixel_size}.")
+    except Exception as e:
+        if log:
+            log.error(f"Error resampling raster '{input_path}': {e}")
+        raise
+

@@ -10,15 +10,6 @@ from utils import validate_array_dtype, normalize_weights, calculate_sharpe_rati
 
 
 class Markowitz:
-    __version__ = "0.1b"
-    __author__ = "<Leonardo Ippolito Rodrigues>"
-    __email__ = "<leoippef@gmail.com>"
-    __license__ = "MIT"
-    __status__ = "Development"
-    __date__ = "2025-04-23"
-    __description__ = """The Markowitz class is the core of the code. Its purpose is to simulate the climate efficiency frontier based on precipitation rasters. 
-    The analogy would be something like an investment analyst who wants to analyze climate data as if they were financial assets."""
-
     def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
                  num_pixels: Optional[int] = None, seed: int = 42) -> None:
         """

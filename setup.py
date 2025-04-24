@@ -21,6 +21,8 @@ setup(
         "Bug Tracker": "https://github.com/leoipp/EfficiencyFrontier/issues",
     },
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
+    package_data={"Markowitz": ["py.typed"]},  # Inclui o arquivo py.typed
+    zip_safe=False,  # Necessário para pacotes tipados
     install_requires=[
         "numpy",
         "rasterio",
