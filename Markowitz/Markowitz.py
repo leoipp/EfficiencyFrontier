@@ -8,7 +8,7 @@ from typing import Optional, List
 from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio
 from checkpoints import check_consistent_crs, check_consistent_pixel_size
 
-from .logging_config import logger
+from logging_config import logger
 
 class Markowitz:
     def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
@@ -77,23 +77,23 @@ class Markowitz:
         """
         files = sorted(glob.glob(self.raster_path_pattern))
         if not files:
-            self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
+            logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
 
         # Check CRS consistency
-        if not check_consistent_crs(files, self.logger):
-            self.logger.warning("Inconsistent CRS detected. Aborting stack loading.")
+        if not check_consistent_crs(files, logger):
+            logger.warning("Inconsistent CRS detected. Aborting stack loading.")
             return
 
         # Check pixel size consistency
-        if not check_consistent_pixel_size(files, self.logger):
-            self.logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
+        if not check_consistent_pixel_size(files, logger):
+            logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
             return
 
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
-        self.logger.info(f"Stack loaded: {self.stack.shape}")
-        self.logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
+        logger.info(f"Stack loaded: {self.stack.shape}")
+        logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
 
     def sample_pixels(self, threshold: float = 0.0, data_percent_tolerance: float = 0.7) -> None:
         """
@@ -117,21 +117,21 @@ class Markowitz:
         valid_ratio = np.mean(self.stack > 0, axis=0)
         valid_mask = valid_ratio >= data_percent_tolerance
 
-        self.logger.info(f"Valid pixels before masking: {np.sum(valid_mask)}")
+        logger.info(f"Valid pixels before masking: {np.sum(valid_mask)}")
         ys, xs = np.where(valid_mask)
         coords = list(zip(ys, xs))
 
         if self.num_pixels is None:
             self.coords = coords
-            self.logger.info(f"All valid pixels sampled: {len(coords)}")
+            logger.info(f"All valid pixels sampled: {len(coords)}")
         else:
             if self.num_pixels > len(coords):
-                self.logger.error(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
+                logger.error(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
                 raise ValueError(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
             np.random.seed(self.seed)
             sampled = np.random.choice(len(coords), self.num_pixels, replace=False)
             self.coords = [coords[i] for i in sampled]
-            self.logger.info(f"{self.num_pixels} random pixels sampled.")
+            logger.info(f"{self.num_pixels} random pixels sampled.")
 
         self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
 
@@ -140,7 +140,7 @@ class Markowitz:
             with rasterio.open(self.target_raster_path) as src:
                 target_data = src.read(1)
                 self.target_values = np.array([target_data[y, x] for y, x in self.coords])
-                self.logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
+                logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
 
     def calculate_statistics(self):
         """
@@ -161,7 +161,7 @@ class Markowitz:
         self.mean_ = self.series.mean(axis=1)
         self.std_ = self.series.std(axis=1)
         self.cov_matrix = np.cov(self.series)
-        self.logger.info("Statistics successfully calculated: mean, standard deviation, and covariance matrix.")
+        logger.info("Statistics successfully calculated: mean, standard deviation, and covariance matrix.")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
@@ -201,7 +201,7 @@ class Markowitz:
             self.weights_list.append(weights)
 
         self.results = results
-        self.logger.info(f"{num_portfolios} portfolios successfully simulated.")
+        logger.info(f"{num_portfolios} portfolios successfully simulated.")
 
     def evaluate_against_target(self):
         """
@@ -216,7 +216,7 @@ class Markowitz:
             retorno_real = np.dot(weights, self.target_values)
             real_returns.append(retorno_real)
 
-        self.logger.info("Evaluation against the return raster completed.")
+        logger.info("Evaluation against the return raster completed.")
         return np.array(real_returns)
 
     def plot_frontier(self):
@@ -235,7 +235,7 @@ class Markowitz:
         plt.colorbar(label='Sharpe Ratio')
         plt.grid(linestyle='--')
         plt.show()
-        self.logger.info("Climate efficiency frontier plotted.")
+        logger.info("Climate efficiency frontier plotted.")
 
     def plot_real_frontier(self):
         """
@@ -254,7 +254,7 @@ class Markowitz:
         plt.colorbar(label='Estimated Production')
         plt.grid(linestyle='--')
         plt.show()
-        self.logger.info("Frontier based on production plotted.")
+        logger.info("Frontier based on production plotted.")
 
     def get_high_sharpe(self, threshold: float=1.0) -> tuple[List[np.ndarray], np.ndarray]:
         """
@@ -269,7 +269,7 @@ class Markowitz:
         high_sharpe_indices = np.where(sharpes >= threshold)[0]
 
         if len(high_sharpe_indices) == 0:
-            self.logger.warning("No portfolio with Sharpe above the threshold.")
+            logger.warning("No portfolio with Sharpe above the threshold.")
             return [], np.zeros_like(self.stack[0], dtype=int)
 
         selected_precips = []
@@ -284,7 +284,7 @@ class Markowitz:
         for y, x in self.coords:
             binary_raster[y, x] = 1
 
-        self.logger.info(f"{len(selected_precips)} portfolios selected with Sharpe >= {threshold}")
+        logger.info(f"{len(selected_precips)} portfolios selected with Sharpe >= {threshold}")
         return selected_precips, binary_raster
 
     def create_tif_from_array(self, output_path: str, array: np.ndarray) -> None:
@@ -304,7 +304,7 @@ class Markowitz:
         # Gets the first raster of the pattern
         files = sorted(glob.glob(self.raster_path_pattern))
         if not files:
-            self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
+            logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
 
         reference_raster = files[0]
@@ -324,7 +324,7 @@ class Markowitz:
             with rasterio.open(output_path, "w", **meta) as dst:
                 dst.write(array, 1)
 
-        self.logger.info(f"GeoTIFF file successfully created at: {output_path}")
+        logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif')
 mk.load_stack()

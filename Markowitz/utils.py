@@ -1,10 +1,10 @@
 from typing import Optional
 
 import numpy as np
-import logging
 import rasterio
 
-from .logging_config import logger
+import logging
+from logging_config import logger
 
 def validate_array_dtype(array: np.ndarray, valid_dtypes: list, log: Optional[logging.Logger] = None) -> np.ndarray:
     """

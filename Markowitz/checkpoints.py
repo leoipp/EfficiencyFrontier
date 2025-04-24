@@ -1,34 +1,9 @@
 from typing import Optional
 
-import logging
 import rasterio
 
-from .logging_config import logger
-
-
-def check_raster_crs(raster_path: str, log: Optional[logging.Logger] = None) -> bool:
-    """
-    Checks if a raster file has a valid CRS (Coordinate Reference System).
-
-    :param raster_path: Path to the raster file.
-    :param log: Optional logger to log messages.
-    :return: True if the raster has a CRS, False otherwise.
-    """
-
-    try:
-        with rasterio.open(raster_path) as src:
-            if src.crs is None:
-                if log:
-                    log.warning(f"The raster file '{raster_path}' has no CRS defined.")
-                return False
-            if log:
-                log.info(f"The raster file '{raster_path}' has a valid CRS: {src.crs}.")
-            return True
-    except Exception as e:
-        if log:
-            log.error(f"Error checking CRS for raster file '{raster_path}': {e}")
-        return False
-
+import logging
+from logging_config import logger
 
 
 def check_consistent_crs(files: list, log: Optional[logging.Logger] = None) -> bool:
@@ -41,7 +16,7 @@ def check_consistent_crs(files: list, log: Optional[logging.Logger] = None) -> b
     """
     if not files:
         if log:
-            log.error(f"No files found for the pattern provided")
+            logger.error(f"No files found for the pattern provided")
         return False
 
     crs_set = set()
@@ -50,21 +25,21 @@ def check_consistent_crs(files: list, log: Optional[logging.Logger] = None) -> b
             with rasterio.open(file) as src:
                 if src.crs is None:
                     if log:
-                        log.warning(f"The raster file '{file}' has no CRS defined.")
+                        logger.warning(f"The raster file '{file}' has no CRS defined.")
                     return False
                 crs_set.add(src.crs)
         except Exception as e:
             if log:
-                log.error(f"Error reading CRS for raster file '{file}': {e}")
+                logger.error(f"Error reading CRS for raster file '{file}': {e}")
             return False
 
     if len(crs_set) > 1:
         if log:
-            log.warning(f"Inconsistent CRS found among rasters: {crs_set}")
+            logger.warning(f"Inconsistent CRS found among rasters: {crs_set}")
         return False
 
     if log:
-        log.info(f"All rasters have a consistent CRS: {crs_set.pop()}")
+        logger.info(f"All rasters have a consistent CRS: {crs_set.pop()}")
     return True
 
 
@@ -78,7 +53,7 @@ def check_consistent_pixel_size(files: list, log: Optional[logging.Logger] = Non
     """
     if not files:
         if log:
-            log.error("No files provided to check pixel size.")
+            logger.error("No files provided to check pixel size.")
         return False
 
     pixel_sizes = set()
@@ -89,14 +64,15 @@ def check_consistent_pixel_size(files: list, log: Optional[logging.Logger] = Non
                 pixel_sizes.add(pixel_size)
         except Exception as e:
             if log:
-                log.error(f"Error reading pixel size for raster file '{file}': {e}")
+                logger.error(f"Error reading pixel size for raster file '{file}': {e}")
             return False
 
     if len(pixel_sizes) > 1:
         if log:
-            log.warning(f"Inconsistent pixel sizes found among rasters: {pixel_sizes}")
+            logger.warning(f"Inconsistent pixel sizes found among rasters: {pixel_sizes}")
         return False
 
     if log:
-        log.info(f"All rasters have a consistent pixel size: {pixel_sizes.pop()}")
+        logger.info(f"All rasters have a consistent pixel size: {pixel_sizes.pop()}")
     return True
+
