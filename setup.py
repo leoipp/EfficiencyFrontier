@@ -5,7 +5,8 @@ setup(
     version="0.1b",
     author="Leonardo Ippolito Rodrigues",
     author_email="leoippef@gmail.com",
-    description="Simulação da fronteira de eficiência climática baseada em rasters.",
+    description="Efficiency frontier simulation for environmental modelling based on markowitz and temporal maximum "
+                "values.",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/leoipp/EfficiencyFrontier.git",
