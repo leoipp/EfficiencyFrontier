@@ -2,12 +2,12 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor
+import logging
+from typing import Optional, List, Tuple
 
 
 class Markowitz:
-    """
-
-    """
     __version__ = "0.1b"
     __author__ = "<Leonardo Ippolito Rodrigues>"
     __email__ = "<leoippef@gmail.com>"
@@ -18,7 +18,8 @@ class Markowitz:
     base em rasters de precipitação. A analogia seria algo como um analista de investimentos que deseja analisar os
     dados climáticos como se fossem ativos financeiros."""
 
-    def __init__(self, raster_path_pattern: str, target_raster: str=None, num_pixels: int=None, seed: int=42) -> None:
+    def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
+                 num_pixels: Optional[int] = None, seed: int = 42) -> None:
         """
         Inicializa a análise de Markowitz sobre rasters.
             :param raster_path_pattern: Padrão para arquivos, ex: 'data/precip_2019-09-*.tif'
@@ -26,6 +27,15 @@ class Markowitz:
             :param num_pixels: Número de pixels a amostrar
             :param seed: Semente para replicabilidade
         """
+        if not isinstance(raster_path_pattern, str) or not raster_path_pattern.strip():
+            raise ValueError("O parâmetro 'raster_path_pattern' deve ser uma string válida.")
+        if target_raster is not None and not isinstance(target_raster, str):
+            raise ValueError("O parâmetro 'target_raster' deve ser uma string ou None.")
+        if num_pixels is not None and (not isinstance(num_pixels, int) or num_pixels <= 0):
+            raise ValueError("O parâmetro 'num_pixels' deve ser um inteiro positivo ou None.")
+        if not isinstance(seed, int) or seed < 0:
+            raise ValueError("O parâmetro 'seed' deve ser um inteiro não negativo.")
+
         self.raster_path_pattern = raster_path_pattern
         self.target_raster_path = target_raster
         self.num_pixels = num_pixels
@@ -34,11 +44,16 @@ class Markowitz:
         self.target_values = None
         self.stack = None
         self.series = None
-        self.mean_precip = None
-        self.std_precip = None
+        self.mean_ = None
+        self.std_ = None
         self.cov_matrix = None
         self.results = None
         self.coords = None
+
+        # Configuração básica do logger
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Classe Markowitz inicializada com sucesso.")
 
     def __repr__(self):
         return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}, "
@@ -73,14 +88,15 @@ class Markowitz:
         :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
+        if not files:
+            self.logger.error(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
+            raise ValueError(f"Nenhum arquivo encontrado para o padrão: {self.raster_path_pattern}")
         stack = [rasterio.open(f).read(1) for f in files]
         self.stack = np.array(stack)
-        print(f"\033[92mStack carregada: {self.stack.shape}\033[0m")
-        print(f"\033[94mTotal de NaNs no stack:{np.isnan(self.stack).sum()}\033[0m")
-        if self.stack.shape[0] == 0:
-            raise ValueError("Nenhum arquivo encontrado. Verifique o padrão do caminho do raster.")
+        self.logger.info(f"Stack carregada: {self.stack.shape}")
+        self.logger.info(f"Total de NaNs no stack: {np.isnan(self.stack).sum()}")
 
-    def sample_pixels(self, threshold: float=0.0, data_percent_tolerance: float=0.7) -> None:
+    def sample_pixels(self, threshold: float = 0.0, data_percent_tolerance: float = 0.7) -> None:
         """
         O objetivo aqui é selecionar um conjunto de pixels aleatórios a partir do stack de precipitação para análise.
         Aqui, estamos basicamente escolhendo alguns "ativos" (ou pixels de precipitação) para observar como eles
@@ -105,20 +121,21 @@ class Markowitz:
         valid_ratio = np.mean(self.stack > 0, axis=0)  # (98, 126)
         valid_mask = valid_ratio >= data_percent_tolerance
 
-        print(f"\033[94mPixels válidos após nova máscara:{np.sum(valid_mask)}\033[0m")
+        self.logger.info(f"Pixels válidos antes da máscara: {np.sum(valid_mask)}")
         ys, xs = np.where(valid_mask)
         coords = list(zip(ys, xs))
 
         if self.num_pixels is None:
             self.coords = coords
-            print(f"\033[92m{len(coords)} pixels amostrados com sucesso.\033[0m")
+            self.logger.info(f"Todos os pixels válidos amostrados: {len(coords)}")
         else:
             if self.num_pixels > len(coords):
+                self.logger.error(f"Você pediu {self.num_pixels} pixels, mas só existem {len(coords)} válidos.")
                 raise ValueError(f"Você pediu {self.num_pixels} pixels, mas só existem {len(coords)} válidos.")
             np.random.seed(self.seed)
             sampled = np.random.choice(len(coords), self.num_pixels, replace=False)
             self.coords = [coords[i] for i in sampled]
-            print(f"{self.num_pixels} pixels amostrados com sucesso.")
+            self.logger.info(f"Amostrados {self.num_pixels} pixels aleatórios.")
 
         self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
 
@@ -127,7 +144,7 @@ class Markowitz:
             with rasterio.open(self.target_raster_path) as src:
                 target_data = src.read(1)
                 self.target_values = np.array([target_data[y, x] for y, x in self.coords])
-                print("Valores de retorno (produção) extraídos com sucesso.")
+                self.logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
 
     def calculate_statistics(self):
         """
@@ -145,10 +162,10 @@ class Markowitz:
         if self.series is None:
             raise ValueError("Pixels não amostrados. Use .sample_pixels() antes.")
 
-        self.mean_precip = self.series.mean(axis=1)
-        self.std_precip = self.series.std(axis=1)
+        self.mean_ = self.series.mean(axis=1)
+        self.std_ = self.series.std(axis=1)
         self.cov_matrix = np.cov(self.series)
-        print("\033[92mEstatísticas climáticas calculadas.\033[0m")
+        self.logger.info("Estatísticas calculadas com sucesso: média, desvio padrão e matriz de covariância.")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
@@ -170,23 +187,25 @@ class Markowitz:
             raise ValueError("Estatísticas não calculadas. Use .calculate_statistics() antes.")
 
         results = np.zeros((3, num_portfolios))
-        n = len(self.mean_precip)
+        n = len(self.mean_)
 
-        for i in range(num_portfolios):
+        def simulate_portfolio():
             weights = np.random.random(n)
             weights /= np.sum(weights)
-            self.weights_list.append(weights)
-
-            retorno = np.dot(weights, self.mean_precip)
+            retorno = np.dot(weights, self.mean_)
             risco = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
             sharpe = retorno / risco
+            return risco, retorno, sharpe, weights
 
+        for i in range(num_portfolios):
+            risco, retorno, sharpe, weights = simulate_portfolio()
             results[0, i] = risco
             results[1, i] = retorno
             results[2, i] = sharpe
+            self.weights_list.append(weights)
 
         self.results = results
-        print(f"\033[92m{num_portfolios} portfolios simulados.\033[0m")
+        self.logger.info(f"{num_portfolios} portfólios simulados com sucesso.")
 
     def evaluate_against_target(self):
         """
@@ -201,6 +220,7 @@ class Markowitz:
             retorno_real = np.dot(weights, self.target_values)
             real_returns.append(retorno_real)
 
+        self.logger.info("Avaliação contra o raster de retorno concluída.")
         return np.array(real_returns)
 
     def plot_frontier(self):
@@ -219,6 +239,7 @@ class Markowitz:
         plt.colorbar(label='Índice Sharpe Climático')
         plt.grid(linestyle='--')
         plt.show()
+        self.logger.info("Fronteira de eficiência climática plotada.")
 
     def plot_real_frontier(self):
         """
@@ -237,6 +258,7 @@ class Markowitz:
         plt.colorbar(label='Produção estimada')
         plt.grid(linestyle='--')
         plt.show()
+        self.logger.info("Fronteira baseada em produção plotada.")
 
     def get_high_sharpe_precip(self, threshold: float=1.0) -> None:
         """
@@ -251,7 +273,7 @@ class Markowitz:
         high_sharpe_indices = np.where(sharpes >= threshold)[0]
 
         if len(high_sharpe_indices) == 0:
-            print("Nenhum portfólio com Sharpe acima do threshold.")
+            self.logger.warning("Nenhum portfólio com Sharpe acima do threshold.")
             return []
 
         selected_precips = []
@@ -261,19 +283,14 @@ class Markowitz:
             combined = np.dot(weights, self.series)
             selected_precips.append(combined)
 
-        print(f"{len(selected_precips)} portfólios selecionados com Sharpe >= {threshold}")
+        self.logger.info(f"{len(selected_precips)} portfólios selecionados com Sharpe >= {threshold}")
         return selected_precips
 
 
-mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
 
-mk.load_stack()
-mk.sample_pixels()
-mk.calculate_statistics()
-mk.simulate_portfolios()
-mk.plot_frontier()
 
 """
+mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
 Variáveis climáticas com avaliação de retorno por pixel dentre as séries temporais:
     mk.load_stack()
     mk.sample_pixels()
@@ -290,3 +307,4 @@ Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produ�
     mk.simulate_portfolios()
     mk.plot_real_frontier()
 """
+
