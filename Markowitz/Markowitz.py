@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 import logging
 from typing import Optional, List
 
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, check_consistent_crs, \
+    check_consistent_pixel_size
 
 
 class Markowitz:
@@ -86,6 +87,8 @@ class Markowitz:
         :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
+        check_consistent_crs(files, self.logger)
+        check_consistent_pixel_size(files, self.logger)
         if not files:
             self.logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
@@ -324,6 +327,9 @@ class Markowitz:
                 dst.write(array, 1)
 
         self.logger.info(f"GeoTIFF file successfully created at: {output_path}")
+
+mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
+mk.load_stack()
 
 """
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
