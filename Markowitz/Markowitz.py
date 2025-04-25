@@ -341,10 +341,10 @@ class Markowitz:
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif',
                r'C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98.tif')
 mk.load_stack()
-mk.sample_pixels()
-mk.calculate_statistics()
-mk.simulate_portfolios()
-mk.plot_real_frontier()
+# mk.sample_pixels()
+# mk.calculate_statistics()
+# mk.simulate_portfolios()
+# mk.plot_real_frontier()
 
 """
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')

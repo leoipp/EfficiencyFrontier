@@ -1,9 +1,8 @@
-import os.path
 from typing import Optional
 
 import numpy as np
 import rasterio
-import rasterio.warp  # Certifique-se de importar o submódulo warp corretamente
+import rasterio.warp
 
 import logging
 from logging_config import logger
@@ -146,9 +145,17 @@ def convert_to_float16(array: np.ndarray, log: Optional[logging.Logger] = None) 
     return array
 
 
-resample_raster(
-    input_path=r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98.tif",
-    output_path=r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98_resampled_GPM.tif",
-    target_pixel_size=(0.08983152841195215, 0.08983152841195215),
-    log=logger
-)
+import glob
+import os
+
+output_path = r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Resample-teste"
+files = glob.glob(r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\*.tif")
+for file in files:
+    print(file)
+    otp = os.path.join(output_path, os.path.basename(file))
+    resample_raster(
+        input_path=file,
+        output_path=otp,
+        target_pixel_size=(0.0002, 0.0002),
+        log=logger
+    )
