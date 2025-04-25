@@ -1,7 +1,9 @@
+import os.path
 from typing import Optional
 
 import numpy as np
 import rasterio
+import rasterio.warp  # Certifique-se de importar o submódulo warp corretamente
 
 import logging
 from logging_config import logger
@@ -68,6 +70,12 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
     """
     try:
         with rasterio.open(input_path) as src:
+            # Check if CRS is in degrees
+            if src.crs.is_geographic:
+                if log:
+                    log.warning(f"The raster '{input_path}' is in a geographic CRS (degrees). "
+                                f"Consider reprojecting to a projected CRS for accurate resampling.")
+
             transform = src.transform
             new_transform = rasterio.Affine(
                 target_pixel_size[0], transform.b, transform.c,
@@ -75,6 +83,12 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
             )
             new_width = int((src.bounds.right - src.bounds.left) / target_pixel_size[0])
             new_height = int((src.bounds.top - src.bounds.bottom) / target_pixel_size[1])
+
+            # Ensure dimensions are valid
+            if new_width <= 0 or new_height <= 0:
+                if log:
+                    log.error(f"Invalid dimensions for resampling raster '{input_path}': width={new_width}, height={new_height}.")
+                raise ValueError(f"Invalid dimensions for resampling raster '{input_path}': width={new_width}, height={new_height}.")
 
             meta = src.meta.copy()
             meta.update({
@@ -100,3 +114,24 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
         if log:
             log.error(f"Error resampling raster '{input_path}': {e}")
         raise
+
+import glob
+import os
+
+# Define o diretório de saída
+output_dir = 'C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/Resample-teste'
+
+# Garante que o diretório de saída exista
+os.makedirs(output_dir, exist_ok=True)
+
+# Obtém os arquivos .tif
+files = sorted(glob.glob('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif'))
+
+for file in files:
+    print(os.path.normpath(file))
+    # Define o caminho de saída para o arquivo resampleado
+    output_path = os.path.join(output_dir, os.path.basename(file).replace('.tif', '_resampled.tif'))
+
+    # Chama a função de resample
+    resample_raster(file, output_path, (0.0005, 0.0005), logger)
+
