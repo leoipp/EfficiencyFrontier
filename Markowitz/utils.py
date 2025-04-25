@@ -70,12 +70,25 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
     """
     try:
         with rasterio.open(input_path) as src:
-            # Check if CRS is in degrees
-            if src.crs.is_geographic:
-                if log:
-                    log.warning(f"The raster '{input_path}' is in a geographic CRS (degrees). "
-                                f"Consider reprojecting to a projected CRS for accurate resampling.")
+            # Check for invalid or extreme values in the raster
+            data = src.read(1)  # Read the first band
+            if log:
+                log.info(f"Original raster statistics: min={data.min()}, max={data.max()}, mean={data.mean()}.")
 
+            # Replace extreme values with NaN (or another placeholder)
+            invalid_mask = (data > 1e10) | (data < -1e10)  # Example threshold for invalid values
+            if invalid_mask.any():
+                if log:
+                    log.warning(f"Raster contains extreme values. Replacing {invalid_mask.sum()} invalid pixels with NaN.")
+                data[invalid_mask] = np.nan
+
+            # Normalize data if necessary
+            if np.nanmax(data) - np.nanmin(data) == 0:
+                if log:
+                    log.error("Raster has no variation (all values are the same). Resampling cannot proceed.")
+                raise ValueError("Raster has no variation (all values are the same).")
+
+            # Update the raster with cleaned data
             transform = src.transform
             new_transform = rasterio.Affine(
                 target_pixel_size[0], transform.b, transform.c,
@@ -99,7 +112,7 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
 
             with rasterio.open(output_path, "w", **meta) as dst:
                 rasterio.warp.reproject(
-                    source=rasterio.band(src, 1),
+                    source=data,
                     destination=rasterio.band(dst, 1),
                     src_transform=src.transform,
                     src_crs=src.crs,
@@ -115,23 +128,27 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
             log.error(f"Error resampling raster '{input_path}': {e}")
         raise
 
-import glob
-import os
 
-# Define o diretório de saída
-output_dir = 'C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/Resample-teste'
+def convert_to_float16(array: np.ndarray, log: Optional[logging.Logger] = None) -> np.ndarray:
+    """
+    Converte um array numpy para o tipo float32.
 
-# Garante que o diretório de saída exista
-os.makedirs(output_dir, exist_ok=True)
+    :param array: Array numpy a ser convertido.
+    :param log: Logger opcional para registrar mensagens.
+    :return: Array convertido para float16.
+    """
+    if array.dtype != np.float16:
+        if log:
+            log.info(f"Convertendo array de dtype {array.dtype} para float16.")
+        return array.astype(np.float16)
+    if log:
+        log.info("Array já está no tipo float16.")
+    return array
 
-# Obtém os arquivos .tif
-files = sorted(glob.glob('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif'))
 
-for file in files:
-    print(os.path.normpath(file))
-    # Define o caminho de saída para o arquivo resampleado
-    output_path = os.path.join(output_dir, os.path.basename(file).replace('.tif', '_resampled.tif'))
-
-    # Chama a função de resample
-    resample_raster(file, output_path, (0.0005, 0.0005), logger)
-
+resample_raster(
+    input_path=r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98.tif",
+    output_path=r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98_resampled_GPM.tif",
+    target_pixel_size=(0.08983152841195215, 0.08983152841195215),
+    log=logger
+)

@@ -27,6 +27,8 @@ setup(
         "numpy",
         "rasterio",
         "matplotlib",
+        "tqdm",
+        "colorlog"
     ],
     classifiers=[
         "Development Status :: 4 - Beta",

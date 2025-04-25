@@ -2,10 +2,12 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import sys  # Adicionado para redirecionar tqdm para stderr
 
 from typing import Optional, List
 
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, convert_to_float16
 from checkpoints import check_consistent_crs, check_consistent_pixel_size
 
 from logging_config import logger
@@ -80,20 +82,26 @@ class Markowitz:
             logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
 
-        # Check CRS consistency
-        if not check_consistent_crs(files, logger):
+        # Check CRS and pixel size consistency
+        if not check_consistent_crs(files, target=self.target_raster_path, log=logger):
             logger.warning("Inconsistent CRS detected. Aborting stack loading.")
             return
 
-        # Check pixel size consistency
-        if not check_consistent_pixel_size(files, logger):
+        if not check_consistent_pixel_size(files, target=self.target_raster_path, log=logger):
             logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
             return
 
-        stack = [rasterio.open(f).read(1) for f in files]
+        # Use tqdm to show progress while loading rasters
+        stack = []
+        for f in tqdm(files, desc="Stacking rasters", file=sys.stderr, ncols=80, disable=False):
+            with rasterio.open(f) as src:
+                _array_ = src.read(1)
+                stack.append(convert_to_float16(_array_))
+
         self.stack = np.array(stack)
         logger.info(f"Stack loaded: {self.stack.shape}")
         logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
+        logger.info(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
 
     def sample_pixels(self, threshold: float = 0.0, data_percent_tolerance: float = 0.7) -> None:
         """
@@ -137,10 +145,14 @@ class Markowitz:
 
         # Load actual return raster
         if self.target_raster_path:
-            with rasterio.open(self.target_raster_path) as src:
-                target_data = src.read(1)
-                self.target_values = np.array([target_data[y, x] for y, x in self.coords])
-                logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
+            try:
+                with rasterio.open(self.target_raster_path) as src:
+                    target_data = src.read(1)
+                    self.target_values = np.array([target_data[y, x] for y, x in self.coords])
+                    logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
+            except Exception as e:
+                logger.error(f"Error loading target raster {self.target_raster_path}: {e}")
+                raise
 
     def calculate_statistics(self):
         """
@@ -326,8 +338,13 @@ class Markowitz:
 
         logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
-mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif')
+mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif',
+               r'C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98.tif')
 mk.load_stack()
+mk.sample_pixels()
+mk.calculate_statistics()
+mk.simulate_portfolios()
+mk.plot_real_frontier()
 
 """
 mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
