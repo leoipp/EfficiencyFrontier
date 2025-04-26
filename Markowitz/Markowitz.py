@@ -3,37 +3,32 @@ import numpy as np
 import glob
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-import sys  # Adicionado para redirecionar tqdm para stderr
+import sys
+import pandas as pd
+import h5py
 
 from typing import Optional, List
 
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, convert_to_float16
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, convert_to_float16, \
+    count_valid_pixels_blockwise
 from checkpoints import check_consistent_crs, check_consistent_pixel_size
 
 from logging_config import logger
 
 class Markowitz:
-    def __init__(self, raster_path_pattern: str, target_raster: Optional[str] = None,
-                 num_pixels: Optional[int] = None, seed: int = 42) -> None:
+    def __init__(self, raster_path_pattern: str,
+                 seed: int = 42) -> None:
         """
         Initializes the Markowitz analysis on rasters.
             :param raster_path_pattern: Pattern for files, e.g., 'data/precip_2019-09-*.tif'
-            :param target_raster: Return raster (production) as an optional argument
-            :param num_pixels: Number of pixels to sample
             :param seed: Seed for reproducibility
         """
         if not isinstance(raster_path_pattern, str) or not raster_path_pattern.strip():
             raise ValueError("The 'raster_path_pattern' parameter must be a valid string.")
-        if target_raster is not None and not isinstance(target_raster, str):
-            raise ValueError("The 'target_raster' parameter must be a string or None.")
-        if num_pixels is not None and (not isinstance(num_pixels, int) or num_pixels <= 0):
-            raise ValueError("The 'num_pixels' parameter must be a positive integer or None.")
         if not isinstance(seed, int) or seed < 0:
             raise ValueError("The 'seed' parameter must be a non-negative integer.")
 
         self.raster_path_pattern = raster_path_pattern
-        self.target_raster_path = target_raster
-        self.num_pixels = num_pixels
         self.seed = seed
         self.weights_list = []
         self.target_values = None
@@ -48,14 +43,11 @@ class Markowitz:
         logger.info("Markowitz class successfully initialized.")
 
     def __repr__(self):
-        return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}, "
-                f"target_raster={self.target_raster_path}, num_pixels={self.num_pixels}, seed={self.seed})")
+        return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}")
 
     def __str__(self):
         return (f"Markowitz Analysis:\n"
                 f" - Raster Path Pattern: {self.raster_path_pattern}\n"
-                f" - Target Raster: {self.target_raster_path}\n"
-                f" - Number of Pixels: {self.num_pixels}\n"
                 f" - Seed: {self.seed}")
 
     def __len__(self):
@@ -66,7 +58,13 @@ class Markowitz:
             raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
         return self.series[index]
 
-    def load_stack(self):
+    def load_stack(
+            self,
+            block_size: int = 716,
+            threshold: float = 0.0,
+            pixel_presence: float = 0.95,
+            save_as: Optional[str] = None,
+            memmap_path: Optional[str] = "stack_float16.dat") -> None:
         """
         This method loads all rasters into a 3D array. This can be compared to collecting financial data from different assets over several days.
         Here, the assets are the daily precipitation values in various regions. Essentially, it samples N valid pixels and extracts time series.
@@ -78,81 +76,89 @@ class Markowitz:
         :return: None
         """
         files = sorted(glob.glob(self.raster_path_pattern))
+
+        # Check if files exist
         if not files:
             logger.error(f"No files found for the pattern: {self.raster_path_pattern}")
             raise ValueError(f"No files found for the pattern: {self.raster_path_pattern}")
 
         # Check CRS and pixel size consistency
-        if not check_consistent_crs(files, target=self.target_raster_path, log=logger):
+        if not check_consistent_crs(files, target=None, log=logger):
             logger.warning("Inconsistent CRS detected. Aborting stack loading.")
             return
 
-        if not check_consistent_pixel_size(files, target=self.target_raster_path, log=logger):
+        # Check if the target raster is valid
+        if not check_consistent_pixel_size(files, target=None, log=logger):
             logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
             return
 
-        # Use tqdm to show progress while loading rasters
-        stack = []
-        for f in tqdm(files, desc="Stacking rasters", file=sys.stderr, ncols=80, disable=False):
-            with rasterio.open(f) as src:
-                _array_ = src.read(1)
-                stack.append(convert_to_float16(_array_))
+        pixel_count, mask = count_valid_pixels_blockwise(files, block_size=block_size, threshold=threshold,
+                                                   pixel_presence=pixel_presence, log=logger, save_as=save_as)
 
-        self.stack = np.array(stack)
+        # Check if pixel_count and mask are valid
+        if pixel_count is None:
+            logger.error("Error counting valid pixels. Aborting stack loading.")
+            return
+        if mask is None:
+            logger.error("Error creating mask. Aborting stack loading.")
+            return
+
+        # Transform the mask to a 1D array
+        mask_flat = mask.ravel()
+
+        # First, determine n_days and n_valid_pixels
+        n_days = len(files)
+        n_valid_pixels = mask_flat.sum()
+
+        # Create memory-mapped file
+        self.stack = np.memmap(memmap_path, dtype='float16', mode='w+', shape=(n_days, n_valid_pixels))
+
+        # Loop and write directly to the memmap
+        for day_idx, file_path in enumerate(files):
+            with rasterio.open(file_path) as src:
+                data = src.read(1)
+                flat_data = data.ravel()
+                filtered_data = flat_data[mask_flat]
+                self.stack[day_idx, :] = filtered_data.astype('float16')  # Write directly
+
+        # Optionally flush to disk
+        self.stack.flush()
+
         logger.info(f"Stack loaded: {self.stack.shape}")
         logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
         logger.info(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
 
-    def sample_pixels(self, threshold: float = 0.0, data_percent_tolerance: float = 0.7) -> None:
+    def sample_pixels(self, num_pixels: Optional[int]=None) -> None:
         """
-        The goal here is to select a set of random pixels from the precipitation stack for analysis.
+        The goal here is to select a set of random pixels from the assets stack for analysis.
         Here, we are essentially choosing some "assets" (or precipitation pixels) to observe how they vary over time.
             How it works:
                  * The code checks which pixels have valid values (precipitation greater than 0).
                  * Then, it samples a number of random pixels, as if we were choosing financial assets to build a portfolio.
                  * The time series of precipitation for these selected pixels will be our time series of returns (simulating the performance of assets over time).
-        :param threshold: Minimum precipitation value to consider a pixel valid
-        :param data_percent_tolerance: Minimum percentage of valid data to consider a pixel valid
+        :param num_pixels: Number of pixels to sample. If None, all valid pixels are selected.
         :return: List of coordinates of sampled pixels
         """
         if self.stack is None:
             raise ValueError("Stack not loaded. Use .load_stack() first.")
 
-        self.stack = np.nan_to_num(self.stack)  # removes NaNs by replacing them with 0
-        self.stack[self.stack < threshold] = 0  # applies threshold
+        n_valid_pixels = self.stack.shape[1]
 
-        # Mask for pixels valid in at least 70% of the dates
-        valid_ratio = np.mean(self.stack > 0, axis=0)
-        valid_mask = valid_ratio >= data_percent_tolerance
-
-        logger.info(f"Valid pixels before masking: {np.sum(valid_mask)}")
-        ys, xs = np.where(valid_mask)
-        coords = list(zip(ys, xs))
-
-        if self.num_pixels is None:
-            self.coords = coords
-            logger.info(f"All valid pixels sampled: {len(coords)}")
+        if num_pixels is None:
+            logger.info(f"All valid pixels selected: {n_valid_pixels}")
+            self.series = np.array(self.stack, copy=True)  # Full copy
+            self.coords = list(range(n_valid_pixels))  # Full list of flat indices
         else:
-            if self.num_pixels > len(coords):
-                logger.error(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
-                raise ValueError(f"You requested {self.num_pixels} pixels, but only {len(coords)} are valid.")
+            if num_pixels > n_valid_pixels:
+                logger.error(f"You requested {num_pixels} pixels, but only {n_valid_pixels} are valid.")
+                raise ValueError(f"You requested {num_pixels} pixels, but only {n_valid_pixels} are valid.")
+
             np.random.seed(self.seed)
-            sampled = np.random.choice(len(coords), self.num_pixels, replace=False)
-            self.coords = [coords[i] for i in sampled]
-            logger.info(f"{self.num_pixels} random pixels sampled.")
+            sampled = np.random.choice(n_valid_pixels, num_pixels, replace=False)
+            self.series = self.stack[:, sampled]
+            self.coords = sampled.tolist()
 
-        self.series = np.array([self.stack[:, y, x] for y, x in self.coords])
-
-        # Load actual return raster
-        if self.target_raster_path:
-            try:
-                with rasterio.open(self.target_raster_path) as src:
-                    target_data = src.read(1)
-                    self.target_values = np.array([target_data[y, x] for y, x in self.coords])
-                    logger.info(f"Raster de retorno real carregado: {self.target_raster_path}")
-            except Exception as e:
-                logger.error(f"Error loading target raster {self.target_raster_path}: {e}")
-                raise
+            logger.info(f"{num_pixels} random pixels sampled.")
 
     def calculate_statistics(self):
         """
@@ -170,9 +176,12 @@ class Markowitz:
         if self.series is None:
             raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
 
-        self.mean_ = self.series.mean(axis=1)
-        self.std_ = self.series.std(axis=1)
-        self.cov_matrix = np.cov(self.series)
+        # Convert to float32 to avoid overflow
+        series = self.series.astype(np.float32)
+
+        self.mean_ = series.mean(axis=1)
+        self.std_ = series.std(axis=1)
+        self.cov_matrix = np.cov(series)
         logger.info("Statistics successfully calculated: mean, standard deviation, and covariance matrix.")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
@@ -194,42 +203,27 @@ class Markowitz:
         if self.cov_matrix is None:
             raise ValueError("Statistics not calculated. Use .calculate_statistics() first.")
 
-        results = np.zeros((3, num_portfolios))
-        n = len(self.mean_)
+        n_assets = len(self.mean_)
+
+        # Create a structured array: columns named 'risk', 'return', 'sharpe'
+        dtype = [('risk', 'float32'), ('return', 'float32'), ('sharpe', 'float32')]
+        self.results = np.zeros(num_portfolios, dtype=dtype)
+        self.weights_list = []
 
         def simulate_portfolio():
-            weights = np.random.random(n)
-            weights = normalize_weights(weights)
-            retorno = np.dot(weights, self.mean_)
-            risco = np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
-            sharpe = calculate_sharpe_ratio(retorno, risco)
-            return risco, retorno, sharpe, weights
+            w = np.random.random(n_assets)
+            w = normalize_weights(w)
+            ret = np.dot(w, self.mean_)
+            risk = np.sqrt(np.dot(w.T, np.dot(self.cov_matrix, w)))
+            sharpe = calculate_sharpe_ratio(ret, risk)
+            return risk, ret, sharpe, w
 
         for i in range(num_portfolios):
-            risco, retorno, sharpe, weights = simulate_portfolio()
-            results[0, i] = risco
-            results[1, i] = retorno
-            results[2, i] = sharpe
+            risk, ret, sharpe, weights = simulate_portfolio()
+            self.results[i] = (risk, ret, sharpe)
             self.weights_list.append(weights)
 
-        self.results = results
         logger.info(f"{num_portfolios} portfolios successfully simulated.")
-
-    def evaluate_against_target(self):
-        """
-        Calculates the actual return of the portfolios using the return raster
-        :return: array of actual returns
-        """
-        if self.target_values is None or self.weights_list is None:
-            raise ValueError("Actual return values or weights are not available.")
-
-        real_returns = []
-        for weights in self.weights_list:
-            retorno_real = np.dot(weights, self.target_values)
-            real_returns.append(retorno_real)
-
-        logger.info("Evaluation against the return raster completed.")
-        return np.array(real_returns)
 
     def plot_frontier(self):
         """
@@ -238,35 +232,20 @@ class Markowitz:
         if self.results is None:
             raise ValueError("Results not simulated. Use .simulate_portfolios() first.")
 
-        risco, retorno, sharpe = self.results
+        risco = self.results['risk']
+        retorno = self.results['return']
+        sharpe = self.results['sharpe']
+
         plt.figure(figsize=(10, 6))
         plt.scatter(risco, retorno, c=sharpe, cmap='plasma', s=10)
-        plt.xlabel('Risk (Standard Deviation)')
+        plt.xlabel('Risk (Volatility)')
         plt.ylabel('Return (Average)')
         plt.title('Efficiency Frontier')
         plt.colorbar(label='Sharpe Ratio')
         plt.grid(linestyle='--')
         plt.show()
+
         logger.info("Climate efficiency frontier plotted.")
-
-    def plot_real_frontier(self):
-        """
-        Plots Risk vs. Actual Return based on the production raster
-        """
-        if self.results is None:
-            raise ValueError("Results not simulated.")
-        real_returns = self.evaluate_against_target()
-        riscos = self.results[0]
-
-        plt.figure(figsize=(10, 6))
-        plt.scatter(riscos, real_returns, c=real_returns, cmap='viridis', s=10)
-        plt.xlabel('Risk (Standard Deviation)')
-        plt.ylabel('Actual Return (Production)')
-        plt.title('Frontier Based on Production')
-        plt.colorbar(label='Estimated Production')
-        plt.grid(linestyle='--')
-        plt.show()
-        logger.info("Frontier based on production plotted.")
 
     def get_high_sharpe(self, threshold: float=1.0) -> tuple[List[np.ndarray], np.ndarray]:
         """
@@ -338,33 +317,19 @@ class Markowitz:
 
         logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
-mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/*.tif',
-               r'C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Target\GEDI_L2A_rh98.tif')
-mk.load_stack()
-# mk.sample_pixels()
-# mk.calculate_statistics()
-# mk.simulate_portfolios()
-# mk.plot_real_frontier()
 
-"""
-mk = Markowitz('C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif')
-mk = Markowitz('C:/Users/c0010261/Scripts/EfficiencyFrontier/Example/GPM_2019-09-012*.tif')
-Variáveis climáticas com avaliação de retorno por pixel dentre as séries temporais:
-    mk.load_stack()
-    mk.sample_pixels()
-    mk.calculate_statistics()
-    mk.simulate_portfolios()
-    mk.plot_frontier()
-    sel, bin = mk.get_high_sharpe(.7)
-    mk.create_tif_from_array('output_mask.tif', bin)
-    
-"""
-"""
-Variáveis climaticas com avaliação de retorno sobre outra variavel Ex. Produção volumétrica:
-    mk.load_stack()
-    mk.sample_pixels()
-    mk.calculate_statistics()
-    mk.simulate_portfolios()
-    mk.plot_real_frontier()
-"""
+mk = Markowitz(r'G:\PycharmProjects\EfficiencyFrontier\Example\Resample-test\*.tif')
+mk.load_stack(
+    block_size=716,
+    threshold=0.0,
+    pixel_presence=0.9,
+    save_as=None,
+    memmap_path='stack_float16.dat'
+)
+mk.sample_pixels()
+mk.calculate_statistics()
+mk.simulate_portfolios()
+mk.plot_frontier()
+sel, bin = mk.get_high_sharpe(.7)
+mk.create_tif_from_array('output_mask.tif', bin)
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import numpy as np
 import rasterio
@@ -6,6 +6,10 @@ import rasterio.warp
 
 import logging
 from logging_config import logger
+
+from rasterio.windows import Window
+from tqdm import tqdm
+
 
 def validate_array_dtype(array: np.ndarray, valid_dtypes: list, log: Optional[logging.Logger] = None) -> np.ndarray:
     """
@@ -145,17 +149,56 @@ def convert_to_float16(array: np.ndarray, log: Optional[logging.Logger] = None) 
     return array
 
 
-import glob
-import os
+def count_valid_pixels_blockwise(
+    files: List[str],
+    block_size: int = 1024,
+    threshold: Optional[float] = 0,
+    pixel_presence: Optional[float] = 0.7,
+    log: Optional[logging.Logger] = None,
+    save_as: Optional[str] = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Conta quantas vezes cada pixel foi válido (> threshold) em todos os rasters, usando leitura em blocos.
+    Também calcula a máscara final de presença mínima de pixels válidos.
 
-output_path = r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\Resample-teste"
-files = glob.glob(r"C:\Users\Leonardo\PycharmProjects\EfficiencyFrontier\Example\*.tif")
-for file in files:
-    print(file)
-    otp = os.path.join(output_path, os.path.basename(file))
-    resample_raster(
-        input_path=file,
-        output_path=otp,
-        target_pixel_size=(0.0002, 0.0002),
-        log=logger
-    )
+    :param files: Lista de caminhos para rasters.
+    :param block_size: Tamanho do bloco para leitura por janela.
+    :param threshold: Limite mínimo para considerar um pixel como válido.
+    :param pixel_presence: Proporção mínima de presença de dados válidos para considerar o pixel como válido.
+    :param log: Logger opcional.
+    :param save_as: Caminho base para salvar a matriz de contagem e a máscara (sem extensão).
+    :return: Tuple com (matriz de contagem absoluta, máscara final binária).
+    """
+    with rasterio.open(files[0]) as src:
+        height, width = src.height, src.width
+        valid_counts = np.zeros((height, width), dtype=np.uint16)
+        if log:
+            log.info(f"Dimensões do raster: altura={height}, largura={width}.")
+
+    for path in tqdm(files, desc="Contando pixels válidos", ncols=100):
+        with rasterio.open(path, 'r', sharing=True) as src:
+            for i in range(0, height, block_size):
+                for j in range(0, width, block_size):
+                    h = min(block_size, height - i)
+                    w = min(block_size, width - j)
+                    window = Window(j, i, w, h)
+                    arr = src.read(1, window=window, masked=False)
+                    arr = convert_to_float16(arr, log=None)
+                    valid_counts[i:i+h, j:j+w] += arr > threshold
+
+    # Calcula proporção e máscara binária
+    valid_ratio = valid_counts / len(files)
+    final_mask = valid_ratio >= pixel_presence
+
+    if log:
+        total_valid = np.sum(final_mask)
+        log.info(f"Pixels válidos com presença >= {pixel_presence:.0%}: {total_valid}")
+
+    # Salvar resultados, se solicitado
+    if save_as:
+        np.save(f"{save_as}_counts.npy", valid_counts)
+        np.save(f"{save_as}_mask.npy", final_mask.astype(np.uint8))
+        if log:
+            log.info(f"Arquivos salvos: {save_as}_counts.npy e {save_as}_mask.npy")
+
+    return valid_counts, final_mask
