@@ -11,58 +11,74 @@ from rasterio.windows import Window
 from tqdm import tqdm
 
 
-def validate_array_dtype(array: np.ndarray, valid_dtypes: list, log: Optional[logging.Logger] = None) -> np.ndarray:
+def validate_array_dtype(
+        array: np.ndarray,
+        valid_dtypes: list,
+        log: Optional[logging.Logger] = None
+) -> np.ndarray:
     """
-    Valida e converte o tipo de dado de um array para um tipo compatível.
+    Validates and converts the data type of an array to a compatible type.
 
-    :param array: Array numpy a ser validado.
-    :param valid_dtypes: Lista de tipos de dados válidos.
-    :param log: Logger opcional para registrar mensagens.
-    :return: Array convertido para um tipo de dado válido, se necessário.
+    :param array: Numpy array to be validated.
+    :param valid_dtypes: List of valid data types.
+    :param log: Optional logger to record messages.
+    :return: Array converted to a valid data type, if necessary.
     """
     if array.dtype not in valid_dtypes:
         if log:
-            logger.warning(f"Convertendo array de dtype {array.dtype} para float32.")
-        return array.astype(np.float32)
+            logger.warning(f"Converting array from dtype {array.dtype} to float32.")
+        return array.astype(np.float16)
     if log:
-        logger.info(f"Array validado com dtype {array.dtype}.")
+        logger.info(f"Array validated with dtype {array.dtype}.")
     return array
 
 
-def normalize_weights(weights: np.ndarray, log: Optional[logging.Logger] = None) -> np.ndarray:
+def normalize_weights(
+        weights: np.ndarray,
+        log: Optional[logging.Logger] = None
+) -> np.ndarray:
     """
-    Normaliza os pesos para que a soma seja igual a 1.
+    Normalizes weights so that their sum equals 1.
 
-    :param weights: Array de pesos.
-    :param log: Logger opcional para registrar mensagens.
-    :return: Array de pesos normalizados.
+    :param weights: Array of weights.
+    :param log: Optional logger to record messages.
+    :return: Array of normalized weights.
     """
     normalized_weights = weights / np.sum(weights)
     if log:
-        logger.info(f"Pesos normalizados: soma = {np.sum(normalized_weights)}.")
+        logger.info(f"Normalized weights: sum = {np.sum(normalized_weights)}.")
     return normalized_weights
 
 
-def calculate_sharpe_ratio(return_mean: float, risk: float, log: Optional[logging.Logger] = None) -> float:
+def calculate_sharpe_ratio(
+        return_mean: float,
+        risk: float,
+        log: Optional[logging.Logger] = None
+) -> float:
     """
-    Calcula o índice de Sharpe dado o retorno médio e o risco.
+    Calculates the Sharpe ratio given the mean return and risk.
 
-    :param return_mean: Retorno médio do portfólio.
-    :param risk: Risco (desvio padrão) do portfólio.
-    :param log: Logger opcional para registrar mensagens.
-    :return: Índice de Sharpe.
+    :param return_mean: Portfolio mean return.
+    :param risk: Portfolio risk (standard deviation).
+    :param log: Optional logger to record messages.
+    :return: Sharpe ratio.
     """
     if risk == 0:
         if log:
-            logger.warning("Risco é 0. Retornando índice de Sharpe como 0.")
+            logger.warning("Risk is 0. Returning Sharpe ratio as 0.")
         return 0
     sharpe_ratio = return_mean / risk
     if log:
-        logger.info(f"Índice de Sharpe calculado: {sharpe_ratio}.")
+        logger.info(f"Calculated Sharpe ratio: {sharpe_ratio}.")
     return sharpe_ratio
 
 
-def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple, log: Optional[logging.Logger] = None) -> None:
+def resample_raster(
+        input_path: str,
+        output_path: str,
+        target_pixel_size: tuple,
+        log: Optional[logging.Logger] = None
+) -> None:
     """
     Resamples a raster to a specified pixel size.
 
@@ -132,20 +148,23 @@ def resample_raster(input_path: str, output_path: str, target_pixel_size: tuple,
         raise
 
 
-def convert_to_float16(array: np.ndarray, log: Optional[logging.Logger] = None) -> np.ndarray:
+def convert_to_float16(
+        array: np.ndarray,
+        log: Optional[logging.Logger] = None
+) -> np.ndarray:
     """
-    Converte um array numpy para o tipo float32.
+    Converts a numpy array to float16 type.
 
-    :param array: Array numpy a ser convertido.
-    :param log: Logger opcional para registrar mensagens.
-    :return: Array convertido para float16.
+    :param array: Numpy array to be converted.
+    :param log: Optional logger to record messages.
+    :return: Array converted to float16.
     """
     if array.dtype != np.float16:
         if log:
-            log.info(f"Convertendo array de dtype {array.dtype} para float16.")
+            log.info(f"Converting array from dtype {array.dtype} to float16.")
         return array.astype(np.float16)
     if log:
-        log.info("Array já está no tipo float16.")
+        log.info("Array is already of type float16.")
     return array
 
 
@@ -158,24 +177,24 @@ def count_valid_pixels_blockwise(
     save_as: Optional[str] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Conta quantas vezes cada pixel foi válido (> threshold) em todos os rasters, usando leitura em blocos.
-    Também calcula a máscara final de presença mínima de pixels válidos.
+    Counts how many times each pixel was valid (> threshold) across all rasters, using blockwise reading.
+    Also calculates the final mask of minimum valid pixel presence.
 
-    :param files: Lista de caminhos para rasters.
-    :param block_size: Tamanho do bloco para leitura por janela.
-    :param threshold: Limite mínimo para considerar um pixel como válido.
-    :param pixel_presence: Proporção mínima de presença de dados válidos para considerar o pixel como válido.
-    :param log: Logger opcional.
-    :param save_as: Caminho base para salvar a matriz de contagem e a máscara (sem extensão).
-    :return: Tuple com (matriz de contagem absoluta, máscara final binária).
+    :param files: List of paths to rasters.
+    :param block_size: Block size for window reading.
+    :param threshold: Minimum threshold to consider a pixel as valid.
+    :param pixel_presence: Minimum proportion of valid data presence to consider the pixel as valid.
+    :param log: Optional logger.
+    :param save_as: Base path to save the count matrix and mask (without extension).
+    :return: Tuple with (absolute count matrix, final binary mask).
     """
     with rasterio.open(files[0]) as src:
         height, width = src.height, src.width
         valid_counts = np.zeros((height, width), dtype=np.uint16)
         if log:
-            log.info(f"Dimensões do raster: altura={height}, largura={width}.")
+            log.info(f"Raster dimensions: height={height}, width={width}.")
 
-    for path in tqdm(files, desc="Contando pixels válidos", ncols=100):
+    for path in tqdm(files, desc="Window - validating pixels", ncols=100):
         with rasterio.open(path, 'r', sharing=True) as src:
             for i in range(0, height, block_size):
                 for j in range(0, width, block_size):
@@ -186,19 +205,114 @@ def count_valid_pixels_blockwise(
                     arr = convert_to_float16(arr, log=None)
                     valid_counts[i:i+h, j:j+w] += arr > threshold
 
-    # Calcula proporção e máscara binária
+    # Calculate proportion and binary mask
     valid_ratio = valid_counts / len(files)
     final_mask = valid_ratio >= pixel_presence
 
     if log:
         total_valid = np.sum(final_mask)
-        log.info(f"Pixels válidos com presença >= {pixel_presence:.0%}: {total_valid}")
+        log.info(f"Valid pixels with presence >= {pixel_presence:.0%}: {total_valid}")
 
-    # Salvar resultados, se solicitado
+    # Save results, if requested
     if save_as:
         np.save(f"{save_as}_counts.npy", valid_counts)
         np.save(f"{save_as}_mask.npy", final_mask.astype(np.uint8))
         if log:
-            log.info(f"Arquivos salvos: {save_as}_counts.npy e {save_as}_mask.npy")
+            log.info(f"Files saved: {save_as}_counts.npy and {save_as}_mask.npy")
 
     return valid_counts, final_mask
+
+
+def read_masked_stack_blockwise(
+    file_path: str,
+    mask: np.ndarray,
+    block_size: int = 1024,
+    dtype: str = 'float16'
+) -> np.ndarray:
+    """
+    Lê um raster aplicando uma máscara, usando leitura por blocos para evitar estouro de memória.
+
+    :param file_path: Caminho para o arquivo raster.
+    :param mask: Máscara booleana 2D (True para pixels válidos).
+    :param block_size: Tamanho do bloco para leitura (em pixels).
+    :param dtype: Tipo de dado final (ex: 'float16', 'float32').
+    :return: 1D array com apenas os pixels válidos aplicados da máscara.
+    """
+    with rasterio.open(file_path) as src:
+        height, width = src.height, src.width
+        mask_flat = mask.ravel()
+        n_pixels = mask_flat.sum()
+        day_data = np.zeros((n_pixels,), dtype=dtype)
+
+        cursor = 0
+
+        for i in range(0, height, block_size):
+            for j in range(0, width, block_size):
+                h = min(block_size, height - i)
+                w = min(block_size, width - j)
+                window = Window(j, i, w, h)
+
+                block = src.read(1, window=window)
+                block_flat = block.ravel()
+
+                mask_block = mask[i:i+h, j:j+w].ravel()
+                valid_block_values = block_flat[mask_block]
+
+                n_valid = len(valid_block_values)
+                day_data[cursor:cursor + n_valid] = valid_block_values.astype(dtype)
+                cursor += n_valid
+
+        assert cursor == n_pixels, f"Cursor ({cursor}) doesn't match expected pixels ({n_pixels})"
+
+    return day_data
+
+
+def normalize_stack(
+        data,
+        method='standard',
+        mean: Optional[np.ndarray]=None,
+        std: Optional[np.ndarray]=None,
+        min_val: Optional[float]=None,
+        max_val: Optional[float]=None,
+        axis: Optional[int]=0
+):
+    """
+    Normaliza dados stackados, podendo usar estatísticas já fornecidas.
+
+    Parâmetros:
+    - data: np.ndarray (2D) [n_amostras, n_variaveis]
+    - method: str, 'standard' (z-score) ou 'minmax' (0 a 1)
+    - mean, std: para metodo 'standard' (podem ser None, calcula se não fornecido)
+    - min_val, max_val: para metodo 'minmax' (idem)
+
+    Retorna:
+    - data_normalized: np.ndarray normalizado
+    - stats: dicionário com parâmetros usados
+    """
+    if not isinstance(data, np.ndarray):
+        raise ValueError("Os dados precisam ser um np.ndarray")
+
+    stats = {}
+
+    if method == 'standard':
+        if mean is None:
+            mean = np.mean(data, axis=axis, keepdims=True)
+        if std is None:
+            std = np.std(data, axis=axis, keepdims=True)
+
+        data_normalized = (data - mean) / std
+        stats = {'mean': mean, 'std': std}
+
+    elif method == 'minmax':
+        if min_val is None:
+            min_val = np.min(data, axis=axis, keepdims=True)
+        if max_val is None:
+            max_val = np.max(data, axis=axis, keepdims=True)
+
+        data_normalized = (data - min_val) / (max_val - min_val)
+        stats = {'min': min_val, 'max': max_val}
+
+    else:
+        raise ValueError("Método de normalização não reconhecido. Use 'standard' ou 'minmax'.")
+
+    return data_normalized, stats

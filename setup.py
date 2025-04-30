@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 from pathlib import Path
 
-# Caminho do README.md
+# README.md path
 readme_path = Path(__file__).parent / "README.md"
 
 setup(
@@ -21,14 +21,15 @@ setup(
         "Bug Tracker": "https://github.com/leoipp/EfficiencyFrontier/issues",
     },
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
-    package_data={"Markowitz": ["py.typed"]},  # Inclui o arquivo py.typed
-    zip_safe=False,  # Necessário para pacotes tipados
+    package_data={"Markowitz": ["py.typed"]},  # Include py.typed
+    zip_safe=False, # Do not use .egg format
     install_requires=[
         "numpy",
         "rasterio",
         "matplotlib",
         "tqdm",
-        "colorlog"
+        "colorlog",
+        "scipy",
     ],
     classifiers=[
         "Development Status :: 4 - Beta",

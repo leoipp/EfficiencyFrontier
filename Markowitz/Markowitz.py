@@ -2,15 +2,12 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-import sys
-import pandas as pd
-import h5py
+from scipy.optimize import minimize
 
 from typing import Optional, List
 
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, convert_to_float16, \
-    count_valid_pixels_blockwise
+from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, count_valid_pixels_blockwise, \
+    read_masked_stack_blockwise, normalize_stack
 from checkpoints import check_consistent_crs, check_consistent_pixel_size
 
 from logging_config import logger
@@ -39,11 +36,12 @@ class Markowitz:
         self.cov_matrix = None
         self.results = None
         self.coords = None
+        self.stats = None
 
         logger.info("Markowitz class successfully initialized.")
 
     def __repr__(self):
-        return (f"Markowitz(raster_path_pattern={self.raster_path_pattern}")
+        return f"Markowitz(raster_path_pattern={self.raster_path_pattern}"
 
     def __str__(self):
         return (f"Markowitz Analysis:\n"
@@ -111,24 +109,41 @@ class Markowitz:
         n_valid_pixels = mask_flat.sum()
 
         # Create memory-mapped file
-        self.stack = np.memmap(memmap_path, dtype='float16', mode='w+', shape=(n_days, n_valid_pixels))
+        self.stack = np.memmap(memmap_path, dtype='float32', mode='w+', shape=(n_days, n_valid_pixels))
 
         # Loop and write directly to the memmap
         for day_idx, file_path in enumerate(files):
-            with rasterio.open(file_path) as src:
-                data = src.read(1)
-                flat_data = data.ravel()
-                filtered_data = flat_data[mask_flat]
-                self.stack[day_idx, :] = filtered_data.astype('float16')  # Write directly
-
+            day_data = read_masked_stack_blockwise(file_path, mask, block_size=block_size, dtype='float32')
+            self.stack[day_idx, :] = day_data
         # Optionally flush to disk
         self.stack.flush()
 
         logger.info(f"Stack loaded: {self.stack.shape}")
-        logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
-        logger.info(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
+        logger.debug(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
+        logger.debug(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
 
-    def sample_pixels(self, num_pixels: Optional[int]=None) -> None:
+    def load_stack_from_dat(self, memmap_path: Optional[str] = "stack_float16.dat") -> None:
+        """
+        This method loads the previously saved memory-mapped raster stack from a .dat file.
+        It allows avoiding the need to reload and process all the rasters again, saving time.
+        """
+        try:
+            # Load the memory-mapped array from the file
+            self.stack = np.memmap(memmap_path, dtype='float16', mode='r')
+
+            logger.info(f"Stack loaded from {memmap_path}: {self.stack.shape}")
+            logger.info(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
+            logger.info(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
+
+        except FileNotFoundError:
+            logger.error(f"File {memmap_path} not found. Please ensure the file exists and try again.")
+        except Exception as e:
+            logger.error(f"An error occurred while loading the stack: {str(e)}")
+
+    def sample_pixels(self,
+                      normalize=True,
+                      method: Optional[str]='standard',
+                      num_pixels: Optional[int]=None) -> None:
         """
         The goal here is to select a set of random pixels from the assets stack for analysis.
         Here, we are essentially choosing some "assets" (or precipitation pixels) to observe how they vary over time.
@@ -137,6 +152,8 @@ class Markowitz:
                  * Then, it samples a number of random pixels, as if we were choosing financial assets to build a portfolio.
                  * The time series of precipitation for these selected pixels will be our time series of returns (simulating the performance of assets over time).
         :param num_pixels: Number of pixels to sample. If None, all valid pixels are selected.
+        :param normalize: If True, normalizes the data.
+        :param method: Normalization method. Options: 'standard', 'minmax', 'robust'.
         :return: List of coordinates of sampled pixels
         """
         if self.stack is None:
@@ -160,6 +177,24 @@ class Markowitz:
 
             logger.info(f"{num_pixels} random pixels sampled.")
 
+        def pct_change(matrix, eps=1e-6):
+            with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+                denom = np.where(np.abs(matrix[:-1, :]) < eps, eps, matrix[:-1, :])
+                returns = (matrix[1:, :] - matrix[:-1, :]) / denom
+                returns[~np.isfinite(returns)] = 0  # substitui inf, -inf, NaN por 0
+            return returns
+
+        self.series = pct_change(self.series)
+
+        if normalize:
+            # Normalize the data
+            self.series, self.stats = normalize_stack(self.series, method=method, axis=0)
+            logger.info(f"Data normalized using method '{method}'.")
+
+        # import pandas as pd
+        # df = pd.DataFrame(self.series, columns=[f'Asset_{i+1}' for i in range(self.series.shape[1])])
+        # df.to_excel('sampled_assets_normalized.xlsx', index=False)
+
     def calculate_statistics(self):
         """
         Now, we will calculate means, standard deviations, and the covariance matrix of the precipitation time series
@@ -176,13 +211,22 @@ class Markowitz:
         if self.series is None:
             raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
 
-        # Convert to float32 to avoid overflow
-        series = self.series.astype(np.float32)
+        series = self.series.astype(np.float16)
 
-        self.mean_ = series.mean(axis=1)
-        self.std_ = series.std(axis=1)
-        self.cov_matrix = np.cov(series)
-        logger.info("Statistics successfully calculated: mean, standard deviation, and covariance matrix.")
+        self.mean_ = series.mean(axis=0)
+        self.std_ = series.std(axis=0)
+        self.cov_matrix = np.cov(series, rowvar=False)
+
+        if not np.isfinite(self.cov_matrix).all():
+            raise ValueError("Covariance matrix contains NaNs or infinite values.")
+
+        # Apply shrinkage
+        shrinkage_intensity = 0.1
+        identity = np.identity(self.cov_matrix.shape[0], dtype=np.float16)
+        self.cov_matrix = (1 - shrinkage_intensity) * self.cov_matrix + shrinkage_intensity * identity
+
+        logger.info(f"Statistics successfully calculated: mean, standard deviation, "
+                    f"and covariance matrix.")
 
     def simulate_portfolios(self, num_portfolios: int=1000) -> None:
         """
@@ -193,7 +237,7 @@ class Markowitz:
                 * Random weights are assigned to each pixel.
                 * For each weight combination, the expected return and risk of the portfolio are calculated, as well as the
                 Sharpe Ratio.
-                    * Return: Weighted average of the precipitations.
+                    * Return: Weighted average.
                     * Risk: Weighted standard deviation using the covariance matrix.
                     * Sharpe Ratio: Calculated by dividing the return by the risk, helping to determine which
                     combination has the best risk-adjusted return.
@@ -213,39 +257,111 @@ class Markowitz:
         def simulate_portfolio():
             w = np.random.random(n_assets)
             w = normalize_weights(w)
-            ret = np.dot(w, self.mean_)
-            risk = np.sqrt(np.dot(w.T, np.dot(self.cov_matrix, w)))
-            sharpe = calculate_sharpe_ratio(ret, risk)
-            return risk, ret, sharpe, w
+            ret_ = np.dot(w, self.mean_)
+            risk_ = np.sqrt(np.dot(w.T, np.dot(self.cov_matrix, w)))
+            sharpe_ = calculate_sharpe_ratio(ret_, risk_)
+            return risk_, ret_, sharpe_, w
 
         for i in range(num_portfolios):
             risk, ret, sharpe, weights = simulate_portfolio()
             self.results[i] = (risk, ret, sharpe)
             self.weights_list.append(weights)
-
         logger.info(f"{num_portfolios} portfolios successfully simulated.")
 
-    def plot_frontier(self):
+    def __optimize__(self):
+        y_ = np.linspace(self.results['return'].min(), self.results['return'].max(), 100)
+        def objective(w):
+            return np.sum(np.array(w) * self.mean_)
+        def constraint(w):
+            return np.sum(w) - 1
+        def constraint2(w):
+            return np.sqrt(np.dot(np.array(w).T, np.dot(self.cov_matrix, np.array(w))))
+        initial_w = [1 / len(self.mean_)] * len(self.mean_)
+        bounds = tuple((0, 1) for _ in range(len(self.mean_)))
+
+        x_ = []
+        for i in y_:
+            constraints_ = (
+                {'type': 'eq', 'fun': constraint},
+                {'type': 'eq', 'fun': lambda w: objective(w) - i}
+            )
+            result = minimize(constraint2, initial_w, method='SLSQP', bounds=bounds, constraints=constraints_)
+            x_.append(result['fun'])
+        return x_, y_
+
+    def optimize_portfolio(self, target_return):
+        """
+        Portfolio optimizer for lower risk given return.
+        """
+        n_assets = len(self.mean_)
+
+        # Verifica limites reais dos retornos simulados
+        min_return = np.min(self.results['return'])
+        max_return = np.max(self.results['return'])
+
+        if not (min_return <= target_return <= max_return):
+            raise ValueError(
+                f"Target return {target_return:.4f} outside the feasible range: [{min_return:.4f}, {max_return:.4f}]")
+
+        # Função objetivo: minimizar risco
+        def portfolio_risk(weights):
+            return np.sqrt(np.dot(weights.T, np.dot(self.cov_matrix, weights)))
+
+        # Restrições
+        constraints = (
+            {'type': 'eq', 'fun': lambda w: np.dot(w, self.mean_) - target_return},
+            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
+        )
+
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        initial_guess = np.repeat(1 / n_assets, n_assets)
+
+        optimized = minimize(portfolio_risk, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints)
+
+        if not optimized.success:
+            raise ValueError('Optimization failed')
+
+        return optimized.x, portfolio_risk(optimized.x)
+
+    def plot_frontier(self, n_points: int=60) -> None:
         """
         Plots the Efficiency Frontier
         """
-        if self.results is None:
-            raise ValueError("Results not simulated. Use .simulate_portfolios() first.")
+        # target_returns = np.linspace(np.min(self.results['return']), np.max(self.results['return']), n_points)
+        #
+        # efficient_risks = []
+        # efficient_returns = []
 
-        risco = self.results['risk']
-        retorno = self.results['return']
-        sharpe = self.results['sharpe']
+        # for ret in target_returns:
+        #     try:
+        #         weights, risk = self.optimize_portfolio(ret)
+        #         efficient_risks.append(risk)
+        #         efficient_returns.append(ret)
+        #     except ValueError:
+        #         # if did not optimize any return - ignore
+        #         continue
 
         plt.figure(figsize=(10, 6))
-        plt.scatter(risco, retorno, c=sharpe, cmap='plasma', s=10)
+        risk_ = self.results['risk']
+        return_ = self.results['return']
+        sharpe = self.results['sharpe']
+
+        plt.scatter(risk_, return_, c=sharpe, cmap='plasma', s=10, zorder=4)
+        # plt.plot(efficient_risks, efficient_returns, color='red', linewidth=2, label='Efficient Frontier ('
+        #                                                                              'Optimized)', zorder=3)
+        x, y = self.__optimize__()
+        plt.plot(x, y, color='red', linewidth=2, label='Efficient Frontier ('
+                                                                                     'Optimized)', zorder=3)
+
         plt.xlabel('Risk (Volatility)')
         plt.ylabel('Return (Average)')
-        plt.title('Efficiency Frontier')
+        plt.title('Optimized Efficiency Frontier')
         plt.colorbar(label='Sharpe Ratio')
-        plt.grid(linestyle='--')
+        plt.grid(linestyle='--', zorder=1)
+        plt.legend()
         plt.show()
 
-        logger.info("Climate efficiency frontier plotted.")
+        logger.info("Optimized climate efficiency frontier plotted.")
 
     def get_high_sharpe(self, threshold: float=1.0) -> tuple[List[np.ndarray], np.ndarray]:
         """
@@ -256,27 +372,27 @@ class Markowitz:
         if self.results is None or self.weights_list is None:
             raise ValueError("Portfolios not simulated yet.")
 
-        riscos, retornos, sharpes = self.results
-        high_sharpe_indices = np.where(sharpes >= threshold)[0]
+        rk_, re_, sh_ = self.results
+        high_sharpe_indices = np.where(sh_ >= threshold)[0]
 
         if len(high_sharpe_indices) == 0:
             logger.warning("No portfolio with Sharpe above the threshold.")
             return [], np.zeros_like(self.stack[0], dtype=int)
 
-        selected_precips = []
+        selected_vars = []
         binary_raster = np.zeros_like(self.stack[0], dtype=int)
         for idx in high_sharpe_indices:
             weights = self.weights_list[idx]
             # Combines the actual time series with the weights (weighted precipitation over time)
             combined = np.dot(weights, self.series)
-            selected_precips.append(combined)
+            selected_vars.append(combined)
 
         # Marks the selected pixels in the binary raster
         for y, x in self.coords:
             binary_raster[y, x] = 1
 
-        logger.info(f"{len(selected_precips)} portfolios selected with Sharpe >= {threshold}")
-        return selected_precips, binary_raster
+        logger.info(f"{len(selected_vars)} portfolios selected with Sharpe >= {threshold}")
+        return selected_vars, binary_raster
 
     def create_tif_from_array(self, output_path: str, array: np.ndarray) -> None:
         """
@@ -290,7 +406,7 @@ class Markowitz:
         if not isinstance(array, np.ndarray):
             raise ValueError("The 'array' parameter must be a numpy array.")
 
-        array = validate_array_dtype(array, [np.uint8, np.int16, np.float32])
+        array = validate_array_dtype(array, [np.uint8, np.int16, np.float16, np.float32, np.float64])
 
         # Gets the first raster of the pattern
         files = sorted(glob.glob(self.raster_path_pattern))
@@ -318,18 +434,19 @@ class Markowitz:
         logger.info(f"GeoTIFF file successfully created at: {output_path}")
 
 
-mk = Markowitz(r'G:\PycharmProjects\EfficiencyFrontier\Example\Resample-test\*.tif')
+mk = Markowitz(r'G:\PycharmProjects\EfficiencyFrontier\Example\GPM-2015-2024\*.tif')
 mk.load_stack(
     block_size=716,
     threshold=0.0,
-    pixel_presence=0.9,
+    pixel_presence=0.99,
     save_as=None,
     memmap_path='stack_float16.dat'
 )
-mk.sample_pixels()
+# mk.load_stack_from_dat(memmap_path='stack_float16.dat')
+mk.sample_pixels(normalize=True, method='standard')
 mk.calculate_statistics()
-mk.simulate_portfolios()
+mk.simulate_portfolios(num_portfolios=1000)
 mk.plot_frontier()
-sel, bin = mk.get_high_sharpe(.7)
-mk.create_tif_from_array('output_mask.tif', bin)
+# sel, bn = mk.get_high_sharpe(.7)
+# mk.create_tif_from_array('output_mask.tif', bn)
 
