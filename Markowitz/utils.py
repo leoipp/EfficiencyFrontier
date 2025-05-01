@@ -1,8 +1,11 @@
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Literal
 import numpy as np
 import rasterio
 import rasterio.warp
 import logging
+
+from sklearn.covariance import LedoitWolf
+
 from logging_config import logger
 from rasterio.windows import Window
 from tqdm import tqdm
@@ -207,7 +210,7 @@ def read_masked_stack_blockwise(
     file_path: str,
     mask: np.ndarray,
     block_size: int = 1024,
-    dtype: str = 'float32'
+    dtype: Literal["float16", "float32", "float64"] = 'float32'
 ) -> np.ndarray:
     """
     Lê um raster aplicando uma máscara, usando leitura por blocos para emitter estouro de memória.
@@ -255,7 +258,7 @@ def normalize_stack(
         min_val: Optional[float]=None,
         max_val: Optional[float]=None,
         axis: Optional[int]=0
-):
+) -> Tuple[np.ndarray, dict]:
     """
     Normaliza dados stackados, podendo usar estatísticas já fornecidas.
 
@@ -294,3 +297,34 @@ def normalize_stack(
         raise ValueError("Método de normalização não reconhecido. Use 'standard' ou 'minmax'.")
 
     return data_normalized, stats
+
+
+def cov_shrinkage(
+    data: np.ndarray,
+    method: Literal["manual", "ledoitwolf"] = "manual",
+    shrinkage_intensity: float = 0.1
+) -> np.ndarray:
+    """
+    Apply shrinkage to the covariance matrix using either manual or Ledoit-Wolf method.
+
+    :param data: 2D numpy array of shape (n_samples, n_features)
+    :param method: "manual" or "ledoitwolf"
+    :param shrinkage_intensity: Shrinkage factor (only used for manual shrinkage)
+    :return: Regularized covariance matrix
+    """
+    cov_matrix = np.cov(data, rowvar=False)
+
+    if not np.isfinite(cov_matrix).all():
+        raise ValueError("Covariance matrix contains NaNs or infinite values.")
+
+    if method == "manual":
+        identity = np.identity(cov_matrix.shape[0], dtype=cov_matrix.dtype)
+        shrunk_cov = (1 - shrinkage_intensity) * cov_matrix + shrinkage_intensity * identity
+        return shrunk_cov
+
+    elif method == "ledoitwolf":
+        estimator = LedoitWolf().fit(data)
+        return estimator.covariance_
+
+    else:
+        raise ValueError(f"Unknown shrinkage method: {method}. Use 'manual' or 'ledoitwolf'.")

@@ -4,14 +4,16 @@ import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
+from joblib.parallel import method
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 from sklearn.decomposition import PCA
 
 import cvxpy as cp
 
-from typing import Optional, List
+from typing import Optional, List, Literal
 
+from Markowitz.utils import cov_shrinkage
 from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, count_valid_pixels_blockwise, \
     read_masked_stack_blockwise, normalize_stack
 from checkpoints import check_consistent_crs, check_consistent_pixel_size
@@ -52,6 +54,7 @@ class Markowitz:
         # --- Output/results ---
         self.results = None
         self.stats = None
+        self.pca_components = None
 
         # --- Spatial properties ---
         self.coords = None
@@ -166,7 +169,7 @@ class Markowitz:
         Loads the memory-mapped raster stack from a .dat file using shape metadata saved as JSON.
 
         :param memmap_path: Path to the memory-mapped .dat file.
-        :param shape_path: Path to the JSON file containing shape and dtype metadata.
+        :param memap_shape_path: Path to the JSON file containing shape and dtype metadata.
         :param dtype: Optional override for dtype. If not provided, it will be read from metadata.
         """
         import json
@@ -193,10 +196,6 @@ class Markowitz:
 
     def sample_pixels(
             self,
-            normalize: bool=True,
-            method: Optional[str]='standard',
-            pca: bool=False,
-            n_components: Optional[int]=None,
             num_pixels: Optional[int]=None
     ) -> None:
         """
@@ -233,38 +232,7 @@ class Markowitz:
             self.num_pixels = num_pixels
 
         self.series = self.__calculate_returns__(self.series)
-
-        if normalize:
-            # Normalize the data
-            self.series, self.stats = normalize_stack(self.series, method=method, axis=0)
-            logger.info(f"Data normalized using method '{method}'.")
-
-    def sample_pixels2(
-            self,
-            normalize: bool = True,
-            method: Optional[str] = 'standard',
-            use_pca: bool = True,  # Novo parâmetro para ativar/desativar PCA
-            n_components: Optional[int] = None  # Número de componentes (None para autodetecção)
-    ) -> None:
-        # Aplica PCA se necessário
-        if use_pca:
-
-            # Define número de componentes para explicar 95% da variância
-            if n_components is None:
-                pca = PCA(n_components=0.95)
-            else:
-                pca = PCA(n_components=n_components)
-
-            self.series = pca.fit_transform(self.series)
-            logger.info(
-                f"PCA aplicado: {self.series.shape[1]} componentes (explicam {100 * pca.explained_variance_ratio_.sum():.1f}% da variância)")
-
-        # Normalização (opcional)
-        if normalize:
-            self.series, self.stats = normalize_stack(self.series, method=method, axis=0)
-            logger.info(f"Dados normalizados com método '{method}'")
-
-        self.coords = list(range(self.series.shape[1]))  # Coordenadas são os índices dos componentes
+        self.series = np.nan_to_num(self.series, nan=0.0, posinf=0.0, neginf=0.0)
 
     @staticmethod
     def __calculate_returns__(data: np.ndarray) -> np.ndarray:
@@ -274,8 +242,16 @@ class Markowitz:
             returns[~np.isfinite(returns)] = 0 # inf, -inf, NaN to 0
         return returns
 
-
-    def calculate_statistics(self):
+    def calculate_statistics(
+            self,
+            method: Literal["manual", "ledoitwolf"] = "ledoitwolf",
+            shrinkage_intensity: float = 0.1,
+            normalize: bool = True,
+            norm_method: Optional[str] = 'standard',
+            pca: bool = False,
+            n_components: float = 0.95,
+            whiten: bool = True
+    ) -> None:
         """
         Now, we will calculate means, standard deviations, and the covariance matrix of the precipitation time series
         from the sampled pixels. These statistics are essential to understand the historical performance and risk of
@@ -291,27 +267,23 @@ class Markowitz:
         if self.series is None:
             raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
 
+        if normalize:
+            # Normalize the data
+            self.series, self.stats = normalize_stack(self.series, method=norm_method, axis=0)
+            logger.info(f"Data normalized using method '{method}'.")
+
+        if pca:
+            _ = PCA(n_components=n_components, whiten=whiten)
+            self.series, self.pca_components = _.fit_transform(self.series)
+            logger.info(f"PCA realizada com {n_components} componentes.")
+            logger.info(f"Variância explicada: {_.explained_variance_ratio_}")
+
+        # Convert to float32 for compatibility with covariance matrix calculation
         series = self.series.astype(np.float32)
 
         self.mean_ = series.mean(axis=0)
         self.std_ = series.std(axis=0)
-        self.cov_matrix = np.cov(series, rowvar=False)
-
-        if not np.isfinite(self.cov_matrix).all():
-            raise ValueError("Covariance matrix contains NaNs or infinite values.")
-
-        # Apply shrinkage
-        # shrinkage_intensity = 0.1
-        #self.cov_matrix = (1 - shrinkage_intensity) * self.cov_matrix + shrinkage_intensity * np.identity(
-        # self.cov_matrix.shape[0], dtype=np.float32)
-
-        # shrinkage_intensity = 0.5
-        # self.cov_matrix = (1 - shrinkage_intensity) * self.cov_matrix + shrinkage_intensity * np.eye(self.cov_matrix.shape[0])
-
-        # Matriz de covariância regularizada (Ledoit-Wolf shrinkage)
-
-        cov_estimator = LedoitWolf().fit(self.series)
-        self.cov_matrix = cov_estimator.covariance_
+        self.cov_matrix = cov_shrinkage(series, method=method, shrinkage_intensity=shrinkage_intensity)
 
         logger.info(f"Statistics successfully calculated: mean, standard deviation, "
                     f"and covariance matrix.")
