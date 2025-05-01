@@ -13,20 +13,23 @@ License: MIT
 """
 
 # Package metadata
-__version__ = "0.1b"
-__author__ = "<Leonardo Ippolito Rodrigues>"
-__email__ = "<leoippef@gmail.com>"
+__title__ = "Markowitz"
+__version__ = "0.1-beta"
+__author__ = "Leonardo Ippolito Rodrigues"
+__email__ = "leoippef@gmail.com"
 __license__ = "MIT"
 __status__ = "Development"
 __date__ = "2025-04-23"
-__description__ = """The Markowitz class is the core of the code. Its purpose is to simulate the climate efficiency frontier based on precipitation rasters. 
-The analogy would be something like an investment analyst who wants to analyze climate data as if they were financial assets."""
-
+__description__ = (
+    "The Markowitz class simulates the climate efficiency frontier based on rasters, "
+    "inspired by financial portfolio optimization theory."
+)
 
 # Import main components
 from .Markowitz import Markowitz
 from . import utils
 from . import checkpoints
+from . import logging_config
 
 # Define what is exported when using `from Markowitz import *`
-__all__ = ["Markowitz", "utils", "checkpoints"]
+__all__ = ["Markowitz", "utils", "checkpoints", "logging_config"]
