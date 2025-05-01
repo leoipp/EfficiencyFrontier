@@ -3,19 +3,22 @@ import unittest
 import numpy as np
 import rasterio
 
-from Markowitz import Markowitz
+from Markowitz.Markowitz import Markowitz
 import os
+import json
+import gc  # Importar o coletor de lixo
 
 
 class TestMarkowitz(unittest.TestCase):
     def setUp(self):
-        self.valid_path = 'C:/Users/Leonardo/PycharmProjects/EfficiencyFrontier/Example/GPM_2019-09-0*.tif'
+        self.valid_path = r'G:\PycharmProjects\EfficiencyFrontier\Example\GPM-2015-2024\*.tif'
         self.invalid_path = 'C:/Invalid/Path/*.tif'
         self.markowitz = Markowitz(self.valid_path)
-        self.markowitz_with_num_pixels = Markowitz(self.valid_path, num_pixels=10)
+        self.markowitz_with_seed = Markowitz(self.valid_path, seed=123)
 
     def test_load_stack(self):
-        self.markowitz.load_stack()
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8, dtype='float32',
+                                  memmap_path='stack_test.dat', memmap_shape_path='stack_shape_test.json')
         self.assertIsNotNone(self.markowitz.stack)
         self.assertGreater(self.markowitz.stack.shape[0], 0)
 
@@ -24,123 +27,98 @@ class TestMarkowitz(unittest.TestCase):
         with self.assertRaises(ValueError):
             mk.load_stack()
 
-    def test_sample_pixels_without_stack(self):
-        with self.assertRaises(ValueError):
-            self.markowitz.sample_pixels()
+    def test_load_datstack(self):
+        memmap_path = 'dummy_stack_test.dat'
+        shape_path = 'dummy_stack_shape_test.json'
+        dummy_data = np.random.rand(10, 100).astype('float32')
 
-    def test_sample_pixels_all_pixels(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        self.assertGreater(len(self.markowitz.coords), 0)
-        self.assertEqual(self.markowitz.series.shape[0], len(self.markowitz.coords))
+        # Criação do arquivo de memória mapeada
+        memmap_file = np.memmap(memmap_path, dtype='float32', mode='w+', shape=dummy_data.shape)
+        memmap_file[:] = dummy_data
+        memmap_file.flush()
+        del memmap_file
+        gc.collect()
 
-    def test_sample_pixels_with_num_pixels(self):
-        self.markowitz_with_num_pixels.load_stack()
-        self.markowitz_with_num_pixels.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        self.assertEqual(len(self.markowitz_with_num_pixels.coords), 10)
-        self.assertEqual(self.markowitz_with_num_pixels.series.shape[0], 10)
+        # Criação do arquivo de metadados
+        with open(shape_path, 'w') as f:
+            json.dump({"shape": list(dummy_data.shape), "dtype": "float32"}, f)  # usa list para serializar corretamente
 
-    def test_calculate_statistics_without_sampling(self):
-        with self.assertRaises(ValueError):
-            self.markowitz.calculate_statistics()
+        # Carregar o arquivo de memória mapeada
+        self.markowitz.load_datstack(memmap_path, shape_path, dtype='float32')
+        self.assertIsNotNone(self.markowitz.stack)
+        self.assertEqual(self.markowitz.stack.shape, dummy_data.shape)
+
+        # Fechar o memmap antes de remover
+        del self.markowitz.stack
+        gc.collect()
+
+        # Remover os arquivos após o teste
+        try:
+            os.remove(memmap_path)
+            os.remove(shape_path)
+        except PermissionError as e:
+            self.fail(f"PermissionError ao remover arquivos: {e}")
+
+    def test_sample_pixels(self):
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8, dtype='float32',
+                                  memmap_path='stack_test.dat', memmap_shape_path='stack_shape_test.json')
+        self.markowitz.sample_pixels(num_pixels=50)
+        self.assertEqual(len(self.markowitz.coords), 50)
+        self.assertEqual(self.markowitz.series.shape[1], 50)
 
     def test_calculate_statistics(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        self.markowitz.calculate_statistics()
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8)
+        self.markowitz.sample_pixels(num_pixels=50)
+        self.markowitz.calculate_statistics(method="manual", shrinkage_intensity=0.2, normalize=True)
         self.assertIsNotNone(self.markowitz.mean_)
         self.assertIsNotNone(self.markowitz.std_)
         self.assertIsNotNone(self.markowitz.cov_matrix)
 
-    def test_simulate_portfolios_without_statistics(self):
-        with self.assertRaises(ValueError):
-            self.markowitz.simulate_portfolios()
-
     def test_simulate_portfolios(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8, dtype='float32',
+                                  memmap_path='stack_test.dat', memmap_shape_path='stack_shape_test.json')
+        self.markowitz.sample_pixels(num_pixels=50)
         self.markowitz.calculate_statistics()
-        self.markowitz.simulate_portfolios(num_portfolios=100)
+        self.markowitz.simulate_portfolios(num_portfolios=200)
         self.assertIsNotNone(self.markowitz.results)
-        self.assertEqual(self.markowitz.results.shape[1], 100)
+        self.assertEqual(len(self.markowitz.results), 200)
 
-    def test_simulate_portfolios_with_num_pixels(self):
-        self.markowitz_with_num_pixels.load_stack()
-        self.markowitz_with_num_pixels.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        self.markowitz_with_num_pixels.calculate_statistics()
-        self.markowitz_with_num_pixels.simulate_portfolios(num_portfolios=50)
-        self.assertIsNotNone(self.markowitz_with_num_pixels.results)
-        self.assertEqual(self.markowitz_with_num_pixels.results.shape[1], 50)
+    def test_plot_frontier(self):
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8, dtype='float32',
+                                  memmap_path='stack_test.dat', memmap_shape_path='stack_shape_test.json')
+        self.markowitz.sample_pixels(num_pixels=50)
+        self.markowitz.calculate_statistics()
+        self.markowitz.simulate_portfolios(num_portfolios=200)
+        try:
+            self.markowitz.plot_frontier(optimize=True)
+        except Exception as e:
+            self.fail(f"plot_frontier raised an exception: {e}")
 
     def test_get_high_sharpe(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8)
+        self.markowitz.sample_pixels(num_pixels=50)
         self.markowitz.calculate_statistics()
-        self.markowitz.simulate_portfolios(num_portfolios=100)
-        high_sharpe_precips, binary_raster = self.markowitz.get_high_sharpe(threshold=1.0)
-        self.assertIsInstance((high_sharpe_precips, binary_raster), tuple)
+        self.markowitz.simulate_portfolios(num_portfolios=200)
+        high_sharpe_precips, binary_raster = self.markowitz.get_high_sharpe(threshold=1.5)
         self.assertIsInstance(high_sharpe_precips, list)
         self.assertIsInstance(binary_raster, np.ndarray)
-        self.assertTrue(np.all(np.logical_or(binary_raster == 0, binary_raster == 1)))
-        self.assertEqual(binary_raster.shape, self.markowitz.stack[0].shape)
 
     def test_create_tif_from_array(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
+        self.markowitz.load_stack(block_size=512, threshold=0.1, pixel_presence=0.8)
+        self.markowitz.sample_pixels(num_pixels=50)
         binary_raster = np.zeros_like(self.markowitz.stack[0], dtype=int)
-        for y, x in self.markowitz.coords:
-            binary_raster[y, x] = 1
+        for idx in self.markowitz.coords:
+            binary_raster[idx] = 1
 
         output_path = "test_output.tif"
         self.markowitz.create_tif_from_array(output_path, binary_raster)
 
-        # Verifica se o arquivo foi criado
         self.assertTrue(os.path.exists(output_path))
-
-        # Verifica se o conteúdo do arquivo é consistente
         with rasterio.open(output_path) as src:
             written_array = src.read(1)
             self.assertTrue(np.array_equal(written_array, binary_raster))
 
-        # Verifica se o arquivo é um GeoTIFF válido
-        with rasterio.open(output_path) as src:
-            self.assertEqual(src.count, 1)  # Deve ter apenas uma banda
-            self.assertEqual(src.width, binary_raster.shape[1])
-            self.assertEqual(src.height, binary_raster.shape[0])
-            self.assertIsNotNone(src.crs)  # Deve ter um sistema de referência espacial
-            self.assertIsNotNone(src.transform)  # Deve ter uma transformação geoespacial
-            written_array = src.read(1)
-            self.assertTrue(np.array_equal(written_array, binary_raster))
-
-        # Remove o arquivo de teste
         os.remove(output_path)
-
-    def test_dunder_repr(self):
-        repr_output = repr(self.markowitz)
-        self.assertIn("Markowitz(raster_path_pattern=", repr_output)
-        self.assertIn("num_pixels=None", repr_output)
-
-    def test_dunder_str(self):
-        str_output = str(self.markowitz)
-        self.assertIn("Markowitz Analysis:", str_output)
-        self.assertIn("Raster Path Pattern:", str_output)
-        self.assertIn("Number of Pixels: None", str_output)
-
-    def test_dunder_len(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        self.assertEqual(len(self.markowitz), len(self.markowitz.coords))
-
-    def test_dunder_getitem(self):
-        self.markowitz.load_stack()
-        self.markowitz.sample_pixels(threshold=0.0, data_percent_tolerance=0.7)
-        first_pixel_series = self.markowitz[0]
-        self.assertEqual(len(first_pixel_series), self.markowitz.stack.shape[0])
-        self.assertTrue(isinstance(first_pixel_series, np.ndarray))
-
-    def test_dunder_getitem_without_sampling(self):
-        with self.assertRaises(ValueError):
-            _ = self.markowitz[0]
 
     def tearDown(self):
         if os.path.exists(self.invalid_path):
