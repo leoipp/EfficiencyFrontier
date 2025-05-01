@@ -13,23 +13,26 @@ from tqdm import tqdm
 
 def validate_array_dtype(
         array: np.ndarray,
-        valid_dtypes: list,
+        valid_dtypes: Optional[list] = None,
         log: Optional[logging.Logger] = None
 ) -> np.ndarray:
     """
-    Validates and converts the data type of an array to a compatible type.
+    Validates and converts the data type of array to a compatible type.
 
     :param array: Numpy array to be validated.
-    :param valid_dtypes: List of valid data types.
+    :param valid_dtypes: List of valid data types. Defaults to [np.float16, np.float32, np.float64].
     :param log: Optional logger to record messages.
     :return: Array converted to a valid data type, if necessary.
     """
+    if valid_dtypes is None:
+        valid_dtypes = [np.float16, np.float32, np.float64]
+
     if array.dtype not in valid_dtypes:
         if log:
-            logger.warning(f"Converting array from dtype {array.dtype} to float32.")
-        return array.astype(np.float16)
+            log.warning(f"Converting array from dtype {array.dtype} to float32.")
+        return array.astype(np.float32)
     if log:
-        logger.info(f"Array validated with dtype {array.dtype}.")
+        log.info(f"Array validated with dtype {array.dtype}.")
     return array
 
 
@@ -148,26 +151,6 @@ def resample_raster(
         raise
 
 
-def convert_to_float16(
-        array: np.ndarray,
-        log: Optional[logging.Logger] = None
-) -> np.ndarray:
-    """
-    Converts a numpy array to float16 type.
-
-    :param array: Numpy array to be converted.
-    :param log: Optional logger to record messages.
-    :return: Array converted to float16.
-    """
-    if array.dtype != np.float16:
-        if log:
-            log.info(f"Converting array from dtype {array.dtype} to float16.")
-        return array.astype(np.float16)
-    if log:
-        log.info("Array is already of type float16.")
-    return array
-
-
 def count_valid_pixels_blockwise(
     files: List[str],
     block_size: int = 1024,
@@ -202,7 +185,7 @@ def count_valid_pixels_blockwise(
                     w = min(block_size, width - j)
                     window = Window(j, i, w, h)
                     arr = src.read(1, window=window, masked=False)
-                    arr = convert_to_float16(arr, log=None)
+                    arr = validate_array_dtype(arr, log=None)
                     valid_counts[i:i+h, j:j+w] += arr > threshold
 
     # Calculate proportion and binary mask
@@ -227,10 +210,10 @@ def read_masked_stack_blockwise(
     file_path: str,
     mask: np.ndarray,
     block_size: int = 1024,
-    dtype: str = 'float16'
+    dtype: str = 'float32'
 ) -> np.ndarray:
     """
-    Lê um raster aplicando uma máscara, usando leitura por blocos para evitar estouro de memória.
+    Lê um raster aplicando uma máscara, usando leitura por blocos para emitter estouro de memória.
 
     :param file_path: Caminho para o arquivo raster.
     :param mask: Máscara booleana 2D (True para pixels válidos).
@@ -291,8 +274,6 @@ def normalize_stack(
     """
     if not isinstance(data, np.ndarray):
         raise ValueError("Os dados precisam ser um np.ndarray")
-
-    stats = {}
 
     if method == 'standard':
         if mean is None:
