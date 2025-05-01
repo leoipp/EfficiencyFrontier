@@ -1,0 +1,36 @@
+[project]
+name = "EfficiencyFrontier"
+version = "0.1b"
+description = "Efficiency frontier simulation for environmental modelling, based on the Markowitz portfolio theory and temporal maximum values."
+readme = "README.md"
+authors = [
+    { name = "Leonardo Ippolito Rodrigues", email = "leoippef@gmail.com" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.7"
+keywords = ["efficiency frontier", "markowitz", "raster", "simulation", "gis", "environmental-modelling"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: GIS"
+]
+dependencies = [
+    "numpy",
+    "rasterio",
+    "matplotlib",
+    "tqdm",
+    "colorlog",
+    "scipy"
+]
+
+[project.urls]
+Homepage = "https://github.com/leoipp/EfficiencyFrontier"
+Source = "https://github.com/leoipp/EfficiencyFrontier"
+Bug Tracker = "https://github.com/leoipp/EfficiencyFrontier/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
