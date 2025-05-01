@@ -15,7 +15,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering :: GIS"
+    "Topic :: Scientific/Engineering :: GIS - Environmental Modelling",
 ]
 dependencies = [
     "numpy",
