@@ -1,12 +1,9 @@
 from typing import Optional, List, Tuple
-
 import numpy as np
 import rasterio
 import rasterio.warp
-
 import logging
 from logging_config import logger
-
 from rasterio.windows import Window
 from tqdm import tqdm
 
