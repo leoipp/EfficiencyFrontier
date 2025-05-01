@@ -1,7 +1,7 @@
 import logging
 import os
 import colorlog
-import sys  # Adicionado para redirecionar o logger para stdout
+import sys  # logger to stdout
 
 # Check if the logger already has handlers to avoid duplicate logs
 logger = logging.getLogger("EfficiencyFrontier")
