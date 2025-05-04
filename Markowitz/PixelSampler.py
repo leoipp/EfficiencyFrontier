@@ -6,9 +6,10 @@ from typing import Optional
 from .logging_config import logger
 
 class PixelSampler:
-    def __init__(self, stack, xy_coords, n_valid_pixels, seed, __calculate_returns__):
+    def __init__(self, stack, xy_coords, sampled_indexes, n_valid_pixels, seed, __calculate_returns__):
         self.stack = stack
         self.xy_coords = xy_coords
+        self.sampled_indexes = None
         self.n_valid_pixels = n_valid_pixels
         self.seed = seed
         self.__calculate_returns__ = __calculate_returns__
@@ -20,9 +21,10 @@ class PixelSampler:
             bayesian_grouping: int = 5,
             kriging: bool = False,
             pca: bool = False,
+            n_components: int = 2,
             kmeans_only: bool = False,
             pca_kmeans: bool = False
-    ) -> None:
+    ) -> np.ndarray:
         """
         Main function that chooses the appropriate sampling method based on the parameters.
         """
@@ -34,7 +36,7 @@ class PixelSampler:
 
         if num_pixels is None:
             self._select_all_pixels()
-            return
+            return np.arange(self.n_valid_pixels)
 
         if num_pixels > self.n_valid_pixels:
             logger.error(f"Requested {num_pixels}, but only {self.n_valid_pixels} are valid.")
@@ -43,19 +45,20 @@ class PixelSampler:
         np.random.seed(self.seed)
 
         if bayesian:
-            sampled = self._sample_bayesian(num_pixels, bayesian_grouping)
+            self.sampled_indexes = self._sample_bayesian(num_pixels, bayesian_grouping)
         elif kriging:
-            sampled = self._sample_kriging(num_pixels)
+            self.sampled_indexes = self._sample_kriging(num_pixels)
         elif pca_kmeans:
-            sampled = self._sample_pca_kmeans(num_pixels)
+            self.sampled_indexes = self._sample_pca_kmeans(num_pixels)
         elif pca:
-            sampled = self._sample_pca(num_pixels)
+            self.sampled_indexes = self._sample_pca(num_pixels, n_components)
         elif kmeans_only:
-            sampled = self._sample_kmeans(num_pixels)
+            self.sampled_indexes = self._sample_kmeans(num_pixels)
         else:
-            sampled = self._sample_random(num_pixels)
+            self.sampled_indexes = self._sample_random(num_pixels)
 
-        self._apply_sampled_pixels(sampled)
+        self._apply_sampled_pixels(self.sampled_indexes)
+        return self.sampled_indexes
 
     def _select_all_pixels(self) -> None:
         """
@@ -82,13 +85,22 @@ class PixelSampler:
 
     def _sample_kriging(self, num_pixels: int) -> np.ndarray:
         """
-        Perform sampling using Kriging-style strategy (e.g., farthest point sampling).
+        Perform sampling using a spatial farthest-point strategy (approximate Kriging-style).
         """
-        logger.info("Sampling using spatial Kriging-style strategy (e.g. farthest point sampling).")
+        logger.info("Sampling using farthest point strategy (Kriging-style).")
         coords = np.array(self.xy_coords)
-        center = np.median(coords, axis=0)
-        distances = np.linalg.norm(coords - center, axis=1)
-        return np.argsort(distances)[:num_pixels]
+        selected = [np.random.randint(len(coords))]  # Começa com ponto aleatório
+        distances = np.full(len(coords), np.inf)
+
+        for _ in range(1, num_pixels):
+            last = coords[selected[-1]]
+            # Atualiza a menor distância de cada ponto aos pontos já escolhidos
+            dist_to_last = np.linalg.norm(coords - last, axis=1)
+            distances = np.minimum(distances, dist_to_last)
+            next_index = np.argmax(distances)
+            selected.append(next_index)
+
+        return np.array(selected)
 
     def _sample_pca_kmeans(self, num_pixels: int) -> np.ndarray:
         """
@@ -106,14 +118,22 @@ class PixelSampler:
             sampled.extend(np.random.choice(idxs, size=n_sample, replace=False))
         return np.array(sampled)
 
-    def _sample_pca(self, num_pixels: int) -> np.ndarray:
+    def _sample_pca(self, num_pixels: int, n_components: int = 2) -> np.ndarray:
         """
-        Perform sampling using PCA without clustering.
+        Perform sampling using PCA for dimensionality reduction without clustering.
+        Selects pixels that are most extreme in the PCA space.
         """
         logger.info("Sampling using PCA for dimensionality reduction without KMeans clustering.")
         pixel_matrix = self.stack.T
-        pca_result = PCA(n_components=2).fit_transform(pixel_matrix)
-        return np.random.choice(self.n_valid_pixels, num_pixels, replace=False)
+        pca_result = PCA(n_components=n_components).fit_transform(pixel_matrix)
+
+        # Calcula a distância de cada ponto até a origem do espaço PCA
+        distances = np.linalg.norm(pca_result, axis=1)
+
+        # Seleciona os 'num_pixels' mais distantes (mais extremos no espaço PCA)
+        sampled_idxs = np.argsort(distances)[-num_pixels:]
+
+        return sampled_idxs
 
     def _sample_kmeans(self, num_pixels: int) -> np.ndarray:
         """
