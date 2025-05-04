@@ -6,7 +6,7 @@ import logging
 
 from sklearn.covariance import LedoitWolf
 
-from logging_config import logger
+from .logging_config import logger
 from rasterio.windows import Window
 from tqdm import tqdm
 
@@ -155,10 +155,10 @@ def count_valid_pixels_blockwise(
     files: List[str],
     block_size: int = 1024,
     threshold: Optional[float] = 0,
-    pixel_presence: Optional[float] = 0.7,
+    pixel_presence: Optional[float] = 0.99,
     log: Optional[logging.Logger] = None,
     save_as: Optional[str] = None
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int], np.ndarray, rasterio.Affine, rasterio.crs.CRS]:
     """
     Counts how many times each pixel was valid (> threshold) across all rasters, using blockwise reading.
     Also calculates the final mask of minimum valid pixel presence.
@@ -169,15 +169,17 @@ def count_valid_pixels_blockwise(
     :param pixel_presence: Minimum proportion of valid data presence to consider the pixel as valid.
     :param log: Optional logger.
     :param save_as: Base path to save the count matrix and mask (without extension).
-    :return: Tuple with (absolute count matrix, final binary mask).
+    :return: Tuple with (count matrix, binary mask, raster shape, valid xy coordinates, transform, crs).
     """
     with rasterio.open(files[0]) as src:
         height, width = src.height, src.width
+        transform = src.transform
+        crs = src.crs
         valid_counts = np.zeros((height, width), dtype=np.uint16)
         if log:
             log.info(f"Raster dimensions: height={height}, width={width}.")
 
-    for path in tqdm(files, desc="Window - validating pixels", ncols=100):
+    for path in tqdm(files, desc=f"Tiles // {block_size} - validating pixels", ncols=100):
         with rasterio.open(path, 'r', sharing=True) as src:
             for i in range(0, height, block_size):
                 for j in range(0, width, block_size):
@@ -203,7 +205,12 @@ def count_valid_pixels_blockwise(
         if log:
             log.info(f"Files saved: {save_as}_counts.npy and {save_as}_mask.npy")
 
-    return valid_counts, final_mask
+    # Get row, col indices and convert to real-world coordinates
+    rows, cols = np.where(final_mask)
+    xs, ys = zip(*[rasterio.transform.xy(transform, r, c) for r, c in zip(rows, cols)])
+    xy_coords = np.column_stack([xs, ys])
+
+    return valid_counts, final_mask, (height, width), xy_coords, transform, crs
 
 
 def read_masked_stack_blockwise(
