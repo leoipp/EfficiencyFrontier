@@ -1,15 +1,17 @@
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 import numpy as np
-from typing import Optional
+from typing import Optional, Literal
 
 from .logging_config import logger
+from .utils import normalize_stack
+
 
 class PixelSampler:
     def __init__(self, stack, xy_coords, sampled_indexes, n_valid_pixels, seed, __calculate_returns__):
         self.stack = stack
         self.xy_coords = xy_coords
-        self.sampled_indexes = None
+        self.sampled_indexes = sampled_indexes
         self.n_valid_pixels = n_valid_pixels
         self.seed = seed
         self.__calculate_returns__ = __calculate_returns__
@@ -23,7 +25,10 @@ class PixelSampler:
             pca: bool = False,
             n_components: int = 2,
             kmeans_only: bool = False,
-            pca_kmeans: bool = False
+            pca_kmeans: bool = False,
+            normalize: bool = False,
+            normalize_method: Literal["standard", "minmax"] = "standard",
+            normalize_axis: Optional[int] = 0,
     ) -> np.ndarray:
         """
         Main function that chooses the appropriate sampling method based on the parameters.
@@ -36,6 +41,8 @@ class PixelSampler:
 
         if num_pixels is None:
             self._select_all_pixels()
+            self.sampling_method = "all"
+            self.num_pixels = self.n_valid_pixels
             return np.arange(self.n_valid_pixels)
 
         if num_pixels > self.n_valid_pixels:
@@ -43,19 +50,37 @@ class PixelSampler:
             raise ValueError(f"You requested {num_pixels} pixels, but only {self.n_valid_pixels} are valid.")
 
         np.random.seed(self.seed)
+        self.num_pixels = num_pixels  # salva para visualização
 
+        # Métodos que requerem normalização
+        needs_normalization = any([pca, pca_kmeans, kmeans_only])
+
+        if normalize:
+            if not needs_normalization:
+                logger.warning("Normalization requested but selected method does not require it.")
+            self.stack, _ = normalize_stack(data=self.stack, method=normalize_method, axis=normalize_axis)
+
+        # Escolha do metodo
         if bayesian:
+            self.sampling_method = "bayesian"
             self.sampled_indexes = self._sample_bayesian(num_pixels, bayesian_grouping)
         elif kriging:
+            self.sampling_method = "kriging"
             self.sampled_indexes = self._sample_kriging(num_pixels)
         elif pca_kmeans:
+            self.sampling_method = "pca_kmeans"
             self.sampled_indexes = self._sample_pca_kmeans(num_pixels)
         elif pca:
+            self.sampling_method = "pca"
             self.sampled_indexes = self._sample_pca(num_pixels, n_components)
         elif kmeans_only:
+            self.sampling_method = "kmeans"
             self.sampled_indexes = self._sample_kmeans(num_pixels)
         else:
+            self.sampling_method = "random"
             self.sampled_indexes = self._sample_random(num_pixels)
+
+        logger.info(f"Sampling method: {self.sampling_method} | Pixels sampled: {num_pixels}")
 
         self._apply_sampled_pixels(self.sampled_indexes)
         return self.sampled_indexes

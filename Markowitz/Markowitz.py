@@ -1,24 +1,23 @@
+# -*- coding: utf-8 -*-
 import json
 
 import rasterio
 import numpy as np
 import glob
 import matplotlib.pyplot as plt
-from joblib.parallel import method
 from scipy.optimize import minimize
-from sklearn.covariance import LedoitWolf
-from sklearn.decomposition import PCA
 
 import cvxpy as cp
 
 from typing import Optional, List, Literal
 
-from Markowitz.utils import cov_shrinkage
-from utils import validate_array_dtype, normalize_weights, calculate_sharpe_ratio, count_valid_pixels_blockwise, \
-    read_masked_stack_blockwise, normalize_stack
-from checkpoints import check_consistent_crs, check_consistent_pixel_size
+from .utils import (validate_array_dtype, normalize_weights, calculate_sharpe_ratio, count_valid_pixels_blockwise,
+                    read_masked_stack_blockwise, normalize_stack, cov_shrinkage)
+from .checkpoints import check_consistent_crs, check_consistent_pixel_size
 
-from logging_config import logger
+from .logging_config import logger
+
+from .PixelSampler import PixelSampler
 
 class Markowitz:
     def __init__(
@@ -50,16 +49,22 @@ class Markowitz:
         self.mean_ = None
         self.std_ = None
         self.cov_matrix = None
+        self.sampling_method = None
 
         # --- Output/results ---
         self.results = None
         self.stats = None
         self.pca_components = None
+        self.sampled_indexes = None
 
         # --- Spatial properties ---
         self.coords = None
         self.num_pixels = None
         self.n_valid_pixels = None
+        self.dimensions = None
+        self.xy_coords = None
+        self.transform = None
+        self.crs = None
 
         logger.info("Markowitz class successfully initialized.")
 
@@ -84,10 +89,11 @@ class Markowitz:
             block_size: int = 716,
             threshold: float = 0.0,
             pixel_presence: float = 0.99,
-            dtype: str = 'float32',
+            dtype: Literal['float16', 'float32', 'float64'] = 'float32',
             save_as: Optional[str] = None,
-            memmap_path: Optional[str] = "stack_float32.dat",
-            memap_shape_path: Optional[str] = "stack_shape.json"
+            memmap_path: str = "stack_data.dat",
+            memmap_shape_path: str = "stack_shape.json",
+            stack_metadata: str = "stack_metadata.npz"
     ) -> None:
         """
         This method loads all rasters into a 3D array. This can be compared to collecting financial data from different assets over several days.
@@ -108,16 +114,36 @@ class Markowitz:
 
         # --- Check CRS and pixel size consistency ---
         if not check_consistent_crs(files, target=None, log=logger):
-            logger.warning("Inconsistent CRS detected. Aborting stack loading.")
+            logger.error("Inconsistent CRS detected. Aborting stack loading.")
             return
 
         # --- Check if the target raster is valid ---
         if not check_consistent_pixel_size(files, target=None, log=logger):
-            logger.warning("Inconsistent pixel sizes detected. Aborting stack loading.")
+            logger.error("Inconsistent pixel sizes detected. Aborting stack loading.")
             return
 
-        pixel_count, mask = count_valid_pixels_blockwise(files, block_size=block_size, threshold=threshold,
-                                                   pixel_presence=pixel_presence, log=logger, save_as=save_as)
+        # --- Check mmemmap path and mmemmap shape path ---
+        if not memmap_path or not memmap_shape_path:
+            logger.error("Memory-mapped path and shape path must be provided.")
+            raise ValueError("Memory-mapped path and shape path must be provided.")
+
+        # --- Validate file extensions ---
+        if not memmap_path.endswith('.dat'):
+            logger.error("memmap_path must end with '.dat'")
+            raise ValueError("memmap_path must end with '.dat'")
+
+        if not memmap_shape_path.endswith('.json'):
+            logger.error("memmap_shape_path must end with '.json'")
+            raise ValueError("memmap_shape_path must end with '.json'")
+
+        if not stack_metadata.endswith('.npz'):
+            logger.error("stack_metadata must end with '.npz'")
+            raise ValueError("stack_metadata must end with '.npz'")
+
+        pixel_count, mask, self.dimensions, self.xy_coords, self.transform, self.crs = count_valid_pixels_blockwise(
+            files, block_size=block_size, threshold=threshold, pixel_presence=pixel_presence, log=logger,
+            save_as=save_as
+        )
 
         # --- Check if pixel_count and mask are valid ---
         if pixel_count is None:
@@ -144,7 +170,7 @@ class Markowitz:
         self.stack.flush()
 
         # --- Save the shape to a .json file ---
-        with open(memap_shape_path, 'w') as f:
+        with open(memmap_shape_path, 'w') as f:
             json.dump(
                 {
                     "shape": [int(n_days), int(n_valid_pixels)],
@@ -152,6 +178,15 @@ class Markowitz:
                 },
                 f
             )
+
+        # --- Save extra metadata to .npz ---
+        np.savez_compressed(
+            stack_metadata,
+            dimensions=self.dimensions,
+            xy_coords=self.xy_coords,
+            transform=np.array(self.transform),  # Affine is not serializable directly
+            crs_wkt=self.crs.to_wkt()  # Serialize CRS as WKT string
+        )
 
         self.n_valid_pixels = self.stack.shape[1]
 
@@ -162,21 +197,21 @@ class Markowitz:
     def load_datstack(
             self,
             memmap_path: str,
-            memap_shape_path: str,
+            memmap_shape_path: str,
+            stack_metadata: str = str,
             dtype: Optional[str] = None
     ) -> None:
         """
         Loads the memory-mapped raster stack from a .dat file using shape metadata saved as JSON.
 
         :param memmap_path: Path to the memory-mapped .dat file.
-        :param memap_shape_path: Path to the JSON file containing shape and dtype metadata.
+        :param memmap_shape_path: Path to the JSON file containing shape and dtype metadata.
+        :param stack_metadata: Path to the .npz file containing additional metadata.
         :param dtype: Optional override for dtype. If not provided, it will be read from metadata.
         """
-        import json
-
         try:
             # Load shape and dtype from JSON
-            with open(memap_shape_path, 'r') as f:
+            with open(memmap_shape_path, 'r') as f:
                 meta = json.load(f)
                 shape = tuple(meta["shape"])
                 dtype = dtype or meta["dtype"]
@@ -185,54 +220,21 @@ class Markowitz:
             self.stack = np.memmap(memmap_path, dtype=dtype, mode='r', shape=shape)
             self.n_valid_pixels = self.stack.shape[1]
 
+            data = np.load(stack_metadata, allow_pickle=True)
+            self.dimensions = tuple(data["dimensions"])
+            self.xy_coords = data["xy_coords"]
+            self.transform = rasterio.Affine(*data["transform"])
+            self.crs = rasterio.crs.CRS.from_wkt(str(data["crs_wkt"]))
+
             logger.info(f"Stack loaded from {memmap_path} with shape {shape} and dtype {dtype}")
             logger.debug(f"Total NaNs in the stack: {np.isnan(self.stack).sum()}")
             logger.debug(f"Total Valid pixels in the stack: {self.stack.size - np.isnan(self.stack).sum()}")
 
         except FileNotFoundError:
-            logger.error(f"File {memmap_path} or shape metadata {memap_shape_path} not found.")
+            logger.error(f"File {memmap_path} or shape metadata {memmap_shape_path} or stack metadata "
+                         f"{stack_metadata} not found.")
         except Exception as e:
             logger.error(f"An error occurred while loading the stack: {str(e)}")
-
-    def sample_pixels(
-            self,
-            num_pixels: Optional[int]=None
-    ) -> None:
-        """
-        The goal here is to select a set of random pixels from the assets stack for analysis.
-        Here, we are essentially choosing some "assets" (or precipitation pixels) to observe how they vary over time.
-            How it works:
-                 * The code checks which pixels have valid values (precipitation greater than 0).
-                 * Then, it samples a number of random pixels, as if we were choosing financial assets to build a portfolio.
-                 * The time series of precipitation for these selected pixels will be our time series of returns (simulating the performance of assets over time).
-        :param num_pixels: Number of pixels to sample. If None, all valid pixels are selected.
-        :param normalize: If True, normalizes the data.
-        :param method: Normalization method. Options: 'standard', 'minmax', 'robust'.
-        :return: List of coordinates of sampled pixels
-        """
-        if self.stack is None:
-            raise ValueError("Stack not loaded. Use .load_stack() first.")
-
-        if num_pixels is None:
-            logger.info(f"All valid pixels selected: {self.n_valid_pixels}")
-            self.series = np.array(self.stack, copy=True)  # Full copy
-            self.coords = list(range(self.n_valid_pixels))  # Full list of flat indices
-            self.num_pixels = self.n_valid_pixels
-        else:
-            if num_pixels > self.n_valid_pixels:
-                logger.error(f"You requested {num_pixels} pixels, but only {self.n_valid_pixels} are valid.")
-                raise ValueError(f"You requested {num_pixels} pixels, but only {self.n_valid_pixels} are valid.")
-
-            np.random.seed(self.seed)
-            sampled = np.random.choice(self.n_valid_pixels, num_pixels, replace=False)
-            self.series = self.stack[:, sampled]
-            self.coords = sampled.tolist()
-
-            logger.info(f"{num_pixels} random pixels sampled.")
-            self.num_pixels = num_pixels
-
-        self.series = self.__calculate_returns__(self.series)
-        self.series = np.nan_to_num(self.series, nan=0.0, posinf=0.0, neginf=0.0)
 
     @staticmethod
     def __calculate_returns__(data: np.ndarray) -> np.ndarray:
@@ -244,13 +246,15 @@ class Markowitz:
 
     def calculate_statistics(
             self,
+            num_pixels: Optional[int] = None,
             method: Literal["manual", "ledoitwolf"] = "ledoitwolf",
+            norm_axis: Optional[int] = 0,
             shrinkage_intensity: float = 0.1,
             normalize: bool = True,
-            norm_method: Optional[str] = 'standard',
-            pca: bool = False,
-            n_components: float = 0.95,
-            whiten: bool = True
+            norm_method: Literal["standard", "minmax"] = 'standard',
+            sampling_method: Optional[Literal['bayesian', 'kriging', 'pca', 'kmeans_only', 'pca_kmeans']] = None,
+            bayesian_grouping: Optional[int] = 5,
+            n_components: Optional[int] = 2
     ) -> None:
         """
         Now, we will calculate means, standard deviations, and the covariance matrix of the precipitation time series
@@ -264,19 +268,37 @@ class Markowitz:
                 together over time, helping to understand if they move together (correlation).
         :return: None
         """
+        # Primeiro, fazemos a amostragem dos pixels
+        # Instanciando o PixelSampler e realizando a amostragem
+        pixel_sampler = PixelSampler(self.stack, self.xy_coords, self.sampled_indexes, self.n_valid_pixels, self.seed,
+                                     self.__calculate_returns__)
+        # Verificando se sampling_method não é None antes de usar o operador 'in'
+        if sampling_method is not None:
+            self.sampled_indexes = pixel_sampler.sample_pixels(
+                num_pixels=num_pixels,
+                bayesian=sampling_method == "bayesian",
+                bayesian_grouping=bayesian_grouping,
+                kriging=sampling_method == "kriging",
+                pca=sampling_method == "pca",
+                kmeans_only=sampling_method == "kmeans_only",
+                pca_kmeans=sampling_method == "pca_kmeans",
+                n_components=n_components,
+                normalize=normalize,
+                normalize_method=norm_method,
+                normalize_axis=norm_axis
+            )
+        else:
+            # Caso sampling_method seja None, use o metodo de amostragem padrão (ex: aleatório)
+            self.sampled_indexes = pixel_sampler.sample_pixels(num_pixels=num_pixels)
+
+        self.num_pixels = num_pixels if num_pixels is not None else self.n_valid_pixels
+        self.sampling_method = sampling_method if sampling_method is not None else "random"
+
+        # Atualizando a série com os pixels amostrados
+        self.series = pixel_sampler.series
+
         if self.series is None:
             raise ValueError("Pixels not sampled. Use .sample_pixels() first.")
-
-        if normalize:
-            # Normalize the data
-            self.series, self.stats = normalize_stack(self.series, method=norm_method, axis=0)
-            logger.info(f"Data normalized using method '{method}'.")
-
-        if pca:
-            _ = PCA(n_components=n_components, whiten=whiten)
-            self.series, self.pca_components = _.fit_transform(self.series)
-            logger.info(f"PCA realizada com {n_components} componentes.")
-            logger.info(f"Variância explicada: {_.explained_variance_ratio_}")
 
         # Convert to float32 for compatibility with covariance matrix calculation
         series = self.series.astype(np.float32)
@@ -375,35 +397,44 @@ class Markowitz:
         valid_indices = ~np.isnan(x_)
         return x_[valid_indices], y_[valid_indices]
 
-    def __optimizeCVPX__(self):
-        """Optimizes the efficient frontier using convex optimization with CVXPY"""
-        n_assets = len(self.mean_)
-        returns = self.mean_
-        cov = self.cov_matrix
+    def plot_sampled_space(
+            self,
+            use_hexbin: bool = False,
+            gridsize: int = 60
+    ) -> None:
+        """
+        Plota a visualização espacial de uma única amostragem de pixels.
 
-        target_returns = np.linspace(returns.min(), returns.max(), 20)
-        x_opt, y_opt = [], []
+        Parâmetros:
+        - use_hexbin: se True, usa hexbin para fundo; senão, usa scatter simples.
+        - gridsize: tamanho da grade para hexbin (quanto maior, menor o hexágono).
+        """
+        coords = np.array(self.xy_coords)
+        sampled_coords = coords[self.sampled_indexes]
 
-        for target in target_returns:
-            w = cp.Variable(n_assets)
-            risk = cp.quad_form(w, cov)
-            ret = returns @ w
+        plt.figure(figsize=(10, 8))
 
-            constraints = [
-                cp.sum(w) == 1,
-                ret >= target,
-                w >= -0.2,  # Permite 20% de venda a descoberto
-                w <= 1.2  # Limite superior relaxado
-            ]
+        if use_hexbin:
+            # Hexbin dos dados totais (todos os pixels)
+            hb = plt.hexbin(coords[:, 0], coords[:, 1], gridsize=gridsize, cmap='Greys', bins='log', mincnt=1,
+                            alpha=0.5)
+            plt.colorbar(hb, label='Densidade (log)')
+        else:
+            # Scatter de todos os pixels
+            plt.scatter(coords[:, 0], coords[:, 1], alpha=0.1, color='gray', label='All Pixels', zorder=2)
 
-            prob = cp.Problem(cp.Minimize(risk), constraints)
-            prob.solve(solver=cp.ECOS)
+        # Scatter dos pixels amostrados
+        plt.scatter(sampled_coords[:, 0], sampled_coords[:, 1], color='green',
+                    label=f'Sampled Pixels - {self.num_pixels / self.n_valid_pixels:.2%}',
+                    s=15, zorder=3)
 
-            if prob.status == 'optimal':
-                x_opt.append(np.sqrt(risk.value))
-                y_opt.append(target)
-
-        return np.array(x_opt), np.array(y_opt)
+        plt.title(f"Spatial Sampling - Método {self.sampling_method}")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.legend()
+        plt.grid(linestyle='--', zorder=1)
+        plt.tight_layout()
+        plt.show()
 
     def plot_frontier(
             self,
@@ -517,23 +548,3 @@ class Markowitz:
                 dst.write(array, 1)
 
         logger.info(f"GeoTIFF file successfully created at: {output_path}")
-
-
-mk = Markowitz(r'G:\PycharmProjects\EfficiencyFrontier\Example\GPM-2015-2024\*.tif')
-# mk.load_stack(
-#     block_size=716,
-#     threshold=0.0,
-#     pixel_presence=0.99,
-#     save_as=None,
-#     memmap_path='stack_float32.dat',
-#     dtype='float32'
-# )
-mk.load_datstack(memmap_path='stack_float32.dat', memap_shape_path='stack_shape.json', dtype='float32')
-# mk.sample_pixels(num_pixels=150, normalize=True, method='standard')
-# mk.sample_pixels2(normalize=True, method='standard', use_pca=False, n_components=100)
-# mk.calculate_statistics()
-# mk.simulate_portfolios(num_portfolios=1000)
-# mk.plot_frontier(optimize=True)
-# sel, bn = mk.get_high_sharpe(.7)
-# mk.create_tif_from_array('output_mask.tif', bn)
-

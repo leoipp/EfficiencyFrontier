@@ -259,7 +259,7 @@ def read_masked_stack_blockwise(
 
 def normalize_stack(
         data,
-        method='standard',
+        method: Literal["standard", "minmax"]='standard',
         mean: Optional[np.ndarray]=None,
         std: Optional[np.ndarray]=None,
         min_val: Optional[float]=None,
